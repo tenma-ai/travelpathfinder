@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { Itinerary, Member } from '../../types';
@@ -27,20 +27,25 @@ interface MapViewProps {
 const MapView = ({ itinerary, members }: MapViewProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const mapInitialized = useRef<boolean>(false);
+  const [mapReady, setMapReady] = useState(false);
   
   // マップの初期化
   useEffect(() => {
     if (!mapContainer.current || !itinerary) return;
     
+    // マップを初期化するか、既存のマップをクリーンアップする
     const initMap = () => {
+      // 既存のマップをクリーンアップ
       if (map.current) {
         map.current.remove();
+        map.current = null;
       }
       
-      // nullチェック
+      // HTMLElement確保
       const container = mapContainer.current;
       if (!container) return;
+      
+      console.log('MapView: マップの初期化を開始します');
       
       // マップの初期化
       map.current = new mapboxgl.Map({
@@ -50,232 +55,145 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
         zoom: 1.5
       });
       
-      const mapInstance = map.current;
-      
-      // マップ読み込み完了後に経路描画
-      mapInstance.on('load', () => {
-        mapInitialized.current = true;
+      // マップ読み込み完了イベントを処理
+      map.current.on('load', () => {
+        console.log('MapView: マップの読み込みが完了しました');
+        
+        if (!map.current) return; // 念のためnullチェック
         
         // ソースとレイヤーを追加
-        mapInstance.addSource('route-source', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: []
-          }
-        });
+        addSourcesAndLayers(map.current);
         
-        // 経路ライン - 陸路
-        mapInstance.addLayer({
-          id: 'route-line-land',
-          type: 'line',
-          source: 'route-source',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round'
-          },
-          paint: {
-            'line-color': TRANSPORT_COLORS.land,
-            'line-width': 3,
-            'line-opacity': 0.8
-          },
-          filter: ['==', ['get', 'transportType'], 'land']
-        });
-        
-        // 経路ライン - 空路
-        mapInstance.addLayer({
-          id: 'route-line-air',
-          type: 'line',
-          source: 'route-source',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round'
-          },
-          paint: {
-            'line-color': TRANSPORT_COLORS.air,
-            'line-width': 3,
-            'line-opacity': 0.8,
-            'line-dasharray': [2, 1]
-          },
-          filter: ['==', ['get', 'transportType'], 'air']
-        });
-        
-        // 経路ライン - 海路
-        mapInstance.addLayer({
-          id: 'route-line-sea',
-          type: 'line',
-          source: 'route-source',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round'
-          },
-          paint: {
-            'line-color': TRANSPORT_COLORS.sea,
-            'line-width': 3,
-            'line-opacity': 0.8,
-            'line-dasharray': [3, 2]
-          },
-          filter: ['==', ['get', 'transportType'], 'sea']
-        });
-        
-        // 経路の点（出発点、到着点など）
-        mapInstance.addLayer({
-          id: 'route-points',
-          type: 'circle',
-          source: 'route-source',
-          paint: {
-            'circle-radius': 8,
-            'circle-color': '#000',
-            'circle-opacity': 0.7
-          },
-          filter: ['==', '$type', 'Point']
-        });
-        
-        // 経路データを更新
-        updateRouteData();
+        // 準備完了フラグをセット
+        setMapReady(true);
       });
     };
     
+    // マップを初期化
     initMap();
     
-    // クリーンアップ
+    // クリーンアップ関数
     return () => {
+      console.log('MapView: マップをクリーンアップします');
       if (map.current) {
         map.current.remove();
         map.current = null;
       }
-      mapInitialized.current = false;
+      setMapReady(false);
     };
-  }, []);
+  }, [itinerary]); // itineraryが変更されたときに再初期化
+  
+  // ソースとレイヤーを追加する関数
+  const addSourcesAndLayers = (mapInstance: mapboxgl.Map) => {
+    try {
+      // ソースとレイヤーが既に存在するかチェック
+      if (mapInstance.getSource('route-source')) {
+        return; // 既に存在する場合は早期リターン
+      }
+      
+      // ソースを追加
+      mapInstance.addSource('route-source', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: []
+        }
+      });
+      
+      // 経路ライン - 陸路
+      mapInstance.addLayer({
+        id: 'route-line-land',
+        type: 'line',
+        source: 'route-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': TRANSPORT_COLORS.land,
+          'line-width': 3,
+          'line-opacity': 0.8
+        },
+        filter: ['==', ['get', 'transportType'], 'land']
+      });
+      
+      // 経路ライン - 空路
+      mapInstance.addLayer({
+        id: 'route-line-air',
+        type: 'line',
+        source: 'route-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': TRANSPORT_COLORS.air,
+          'line-width': 3,
+          'line-opacity': 0.8,
+          'line-dasharray': [2, 1]
+        },
+        filter: ['==', ['get', 'transportType'], 'air']
+      });
+      
+      // 経路ライン - 海路
+      mapInstance.addLayer({
+        id: 'route-line-sea',
+        type: 'line',
+        source: 'route-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': TRANSPORT_COLORS.sea,
+          'line-width': 3,
+          'line-opacity': 0.8,
+          'line-dasharray': [3, 2]
+        },
+        filter: ['==', ['get', 'transportType'], 'sea']
+      });
+      
+      // 経路の点（出発点、到着点など）
+      mapInstance.addLayer({
+        id: 'route-points',
+        type: 'circle',
+        source: 'route-source',
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#000',
+          'circle-opacity': 0.7
+        },
+        filter: ['==', '$type', 'Point']
+      });
+      
+      console.log('MapView: ソースとレイヤーを追加しました');
+    } catch (error) {
+      console.error('MapView: ソースとレイヤーの追加に失敗しました', error);
+    }
+  };
   
   // 経路データの更新
   useEffect(() => {
-    if (!itinerary) return;
-    
-    if (!map.current) {
-      // マップがまだ初期化されていない場合は初期化する
-      if (mapContainer.current) {
-        const initMap = () => {
-          // nullチェック後にnon-null assertionを使用
-          const container = mapContainer.current;
-          if (!container) return;
-          
-          // マップの初期化
-          map.current = new mapboxgl.Map({
-            container: container as HTMLElement,
-            style: 'mapbox://styles/mapbox/light-v10',
-            center: [0, 20], // 初期表示位置（世界全体が見えるように）
-            zoom: 1.5
-          });
-          
-          const mapInstance = map.current;
-          
-          // マップ読み込み完了後に経路描画
-          mapInstance.on('load', () => {
-            mapInitialized.current = true;
-            
-            // ソースとレイヤーを追加
-            mapInstance.addSource('route-source', {
-              type: 'geojson',
-              data: {
-                type: 'FeatureCollection',
-                features: []
-              }
-            });
-            
-            // 経路ライン - 陸路
-            mapInstance.addLayer({
-              id: 'route-line-land',
-              type: 'line',
-              source: 'route-source',
-              layout: {
-                'line-join': 'round',
-                'line-cap': 'round'
-              },
-              paint: {
-                'line-color': TRANSPORT_COLORS.land,
-                'line-width': 3,
-                'line-opacity': 0.8
-              },
-              filter: ['==', ['get', 'transportType'], 'land']
-            });
-            
-            // 経路ライン - 空路
-            mapInstance.addLayer({
-              id: 'route-line-air',
-              type: 'line',
-              source: 'route-source',
-              layout: {
-                'line-join': 'round',
-                'line-cap': 'round'
-              },
-              paint: {
-                'line-color': TRANSPORT_COLORS.air,
-                'line-width': 3,
-                'line-opacity': 0.8,
-                'line-dasharray': [2, 1]
-              },
-              filter: ['==', ['get', 'transportType'], 'air']
-            });
-            
-            // 経路ライン - 海路
-            mapInstance.addLayer({
-              id: 'route-line-sea',
-              type: 'line',
-              source: 'route-source',
-              layout: {
-                'line-join': 'round',
-                'line-cap': 'round'
-              },
-              paint: {
-                'line-color': TRANSPORT_COLORS.sea,
-                'line-width': 3,
-                'line-opacity': 0.8,
-                'line-dasharray': [3, 2]
-              },
-              filter: ['==', ['get', 'transportType'], 'sea']
-            });
-            
-            // 経路の点（出発点、到着点など）
-            mapInstance.addLayer({
-              id: 'route-points',
-              type: 'circle',
-              source: 'route-source',
-              paint: {
-                'circle-radius': 8,
-                'circle-color': '#000',
-                'circle-opacity': 0.7
-              },
-              filter: ['==', '$type', 'Point']
-            });
-            
-            // 経路データを更新
-            updateRouteData();
-          });
-        };
-        
-        initMap();
-      }
-      return;
-    }
-    
+    if (!itinerary || !map.current) return;
+
     // マップが読み込み完了しているか確認
-    if (!mapInitialized.current) {
-      map.current.on('load', () => {
-        mapInitialized.current = true;
-        updateRouteData();
-      });
+    if (!mapReady) {
+      console.log('MapView: マップがまだ準備できていません');
       return;
     }
     
+    console.log('MapView: 経路データを更新します');
     updateRouteData();
-  }, [itinerary, members]);
+    
+  }, [itinerary, members, mapReady]);
   
   // 経路データの更新関数
   const updateRouteData = () => {
-    if (!map.current || !itinerary || !mapInitialized.current) return;
+    if (!map.current || !itinerary || !mapReady) return;
     
     try {
+      console.log('MapView: 経路データ更新処理を開始します');
+      
       // マーカーを全て削除
       const markerElements = document.querySelectorAll('.mapboxgl-marker');
       markerElements.forEach(element => element.remove());
@@ -346,22 +264,22 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
         features: [...pointFeatures, ...routeFeatures]
       };
       
-      // ソースデータが存在するか確認し、存在しなければ追加
-      let source = map.current.getSource('route-source') as mapboxgl.GeoJSONSource;
-      if (!source) {
-        // ソースとレイヤーが存在しない場合は再作成
-        map.current.addSource('route-source', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: []
-          }
-        });
-        source = map.current.getSource('route-source') as mapboxgl.GeoJSONSource;
-      }
-      
-      if (source) {
-        source.setData(geojsonData as any);
+      // ソースとレイヤーが存在するか確認し、存在しなければ追加
+      try {
+        if (!map.current.getSource('route-source')) {
+          addSourcesAndLayers(map.current);
+        }
+        
+        // ソースデータを更新
+        const source = map.current.getSource('route-source') as mapboxgl.GeoJSONSource;
+        if (source) {
+          source.setData(geojsonData as any);
+          console.log('MapView: ソースデータを更新しました');
+        } else {
+          console.warn('MapView: route-sourceが見つかりません');
+        }
+      } catch (error) {
+        console.error('MapView: ソースデータの更新に失敗しました', error);
       }
       
       // 各地点にマーカーを追加
@@ -404,26 +322,30 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
       });
       
       // マップの表示範囲を調整
-      // ごくまれに coords が正しく設定されていない場合があるため、安全対策を追加
       if (coordinates.length > 0) {
-        let bounds = new mapboxgl.LngLatBounds();
-        coordinates.forEach(coord => {
-          if (Array.isArray(coord) && coord.length === 2 && 
-              !isNaN(coord[0]) && !isNaN(coord[1])) {
-            bounds.extend(coord);
-          }
-        });
-        
-        // バウンディングボックスが有効な場合のみfitBoundsを呼び出す
-        if (!bounds.isEmpty()) {
-          map.current.fitBounds(bounds, {
-            padding: 50,
-            maxZoom: 10
+        try {
+          let bounds = new mapboxgl.LngLatBounds();
+          coordinates.forEach(coord => {
+            if (Array.isArray(coord) && coord.length === 2 && 
+                !isNaN(coord[0]) && !isNaN(coord[1])) {
+              bounds.extend(coord);
+            }
           });
+          
+          // バウンディングボックスが有効な場合のみfitBoundsを呼び出す
+          if (!bounds.isEmpty()) {
+            map.current.fitBounds(bounds, {
+              padding: 50,
+              maxZoom: 10
+            });
+            console.log('MapView: マップの表示範囲を調整しました');
+          }
+        } catch (error) {
+          console.error('MapView: 表示範囲の調整に失敗しました', error);
         }
       }
     } catch (error) {
-      console.error('MapView: 経路データ更新エラー', error);
+      console.error('MapView: 経路データ更新処理でエラーが発生しました', error);
     }
   };
   
@@ -461,7 +383,37 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
   };
   
   return (
-    <div ref={mapContainer} className="h-full w-full rounded-lg" />
+    <div className="relative h-full w-full">
+      <div ref={mapContainer} className="h-full w-full rounded-lg" />
+      
+      {/* マップの凡例 */}
+      <div className="absolute bottom-2 right-2 bg-white p-2 rounded shadow-md text-sm">
+        <div className="flex items-center mb-1">
+          <div style={{ width: 20, height: 3, backgroundColor: TRANSPORT_COLORS.land, marginRight: 4 }} />
+          <span>陸路</span>
+        </div>
+        <div className="flex items-center mb-1">
+          <div style={{ 
+            width: 20, 
+            height: 3, 
+            backgroundImage: `linear-gradient(to right, ${TRANSPORT_COLORS.air} 50%, transparent 50%)`,
+            backgroundSize: '6px 3px',
+            marginRight: 4
+          }} />
+          <span>空路</span>
+        </div>
+        <div className="flex items-center">
+          <div style={{ 
+            width: 20, 
+            height: 3, 
+            backgroundImage: `linear-gradient(to right, ${TRANSPORT_COLORS.sea} 50%, transparent 50%)`,
+            backgroundSize: '8px 3px',
+            marginRight: 4
+          }} />
+          <span>海路</span>
+        </div>
+      </div>
+    </div>
   );
 };
 
