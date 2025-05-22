@@ -240,30 +240,73 @@ function createItinerary(selectedLocations: DesiredLocation[], tripInfo: TripInf
   // 出発地に戻る場合
   if (returnToDeparture) {
     const lastLoc = itineraryLocations[itineraryLocations.length - 1].location;
-    const transportType = determineTransportType(lastLoc, departureLocation);
-    const travelDuration = estimateTransportDuration(lastLoc, departureLocation, transportType);
-    const travelDays = Math.ceil(travelDuration / 24);
-    
-    currentDate = new Date(currentDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
-    
-    const returnLoc: ItineraryLocation = {
-      id: uuidv4(),
-      location: departureLocation,
-      arrivalDate: new Date(currentDate),
-      departureDate: new Date(currentDate),
-      originalRequesters: []
-    };
-    
-    const returnRoute: Route = {
-      id: uuidv4(),
-      from: itineraryLocations[itineraryLocations.length - 1].id,
-      to: returnLoc.id,
-      transportType,
-      estimatedDuration: travelDuration
-    };
-    
-    itineraryLocations.push(returnLoc);
-    routes.push(returnRoute);
+    let transportType = determineTransportType(lastLoc, departureLocation);
+
+    const subRoutes: { from: Location; to: Location; type: 'air' | 'land' }[] = [];
+
+    if (transportType === 'air') {
+      let src = lastLoc;
+      let dst = departureLocation;
+
+      if (!isAirport(src)) {
+        const nearest = findNearestAirport(src);
+        if (nearest) {
+          subRoutes.push({ from: src, to: nearest, type: 'land' });
+          src = nearest;
+        } else {
+          transportType = 'land';
+        }
+      }
+
+      if (transportType === 'air' && !isAirport(dst)) {
+        const nearestDst = findNearestAirport(dst);
+        if (nearestDst) {
+          dst = nearestDst;
+        } else {
+          transportType = 'land';
+        }
+      }
+
+      if (transportType === 'air') {
+        subRoutes.push({ from: src, to: dst, type: 'air' });
+      }
+
+      if (transportType === 'air' && !isAirport(departureLocation)) {
+        subRoutes.push({ from: dst, to: departureLocation, type: 'land' });
+      }
+    }
+
+    if (subRoutes.length === 0) {
+      subRoutes.push({ from: lastLoc, to: departureLocation, type: 'land' });
+    }
+
+    for (const sr of subRoutes) {
+      const dur = estimateTransportDuration(sr.from, sr.to, sr.type);
+      const days = Math.ceil(dur / 24);
+      currentDate = new Date(currentDate.getTime() + days * 24 * 60 * 60 * 1000);
+
+      const arr = new Date(currentDate);
+      const dep = new Date(currentDate);
+      const locId = uuidv4();
+      const itLoc: ItineraryLocation = {
+        id: locId,
+        location: sr.to,
+        arrivalDate: arr,
+        departureDate: dep,
+        originalRequesters: []
+      };
+
+      const route: Route = {
+        id: uuidv4(),
+        from: itineraryLocations[itineraryLocations.length - 1].id,
+        to: locId,
+        transportType: sr.type,
+        estimatedDuration: dur
+      };
+
+      itineraryLocations.push(itLoc);
+      routes.push(route);
+    }
   }
   
   // メンバー満足度スコアを計算
