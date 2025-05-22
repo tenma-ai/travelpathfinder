@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SoloTripForm from '../components/trip/SoloTripForm';
 import ResultView from '../components/trip/ResultView';
@@ -10,10 +10,26 @@ import { generateOptimalRoute } from '../utils/routeOptimizer';
  */
 const SoloTripPage = () => {
   const navigate = useNavigate();
+  const STORAGE_KEY = 'soloTripLast';
   const [loading, setLoading] = useState(false);
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
+  
+  // 初回ロード時に保存された旅程を復元
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed: TripInfo = JSON.parse(saved);
+        // Date fields rehydrate
+        if (parsed.startDate) parsed.startDate = new Date(parsed.startDate);
+        if (parsed.endDate) parsed.endDate = new Date(parsed.endDate);
+        if (parsed.lastUpdated) parsed.lastUpdated = new Date(parsed.lastUpdated);
+        setTripInfo(parsed);
+      }
+    } catch {}
+  }, []);
   
   // 旅程生成処理
   const handleFormSubmit = async (formData: TripInfo) => {
@@ -32,6 +48,9 @@ const SoloTripPage = () => {
       };
       
       setTripInfo(updatedTripInfo);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTripInfo));
+      } catch {}
       setShowAddLocationForm(false); // 希望地追加後は結果画面に戻る
       setShowEditForm(false); // プラン編集後は結果画面に戻る
     } catch (error) {
@@ -47,6 +66,7 @@ const SoloTripPage = () => {
     setTripInfo(null);
     setShowAddLocationForm(false);
     setShowEditForm(false);
+    try { localStorage.removeItem(STORAGE_KEY);} catch {}
   };
   
   // 希望地を追加するフォームを表示

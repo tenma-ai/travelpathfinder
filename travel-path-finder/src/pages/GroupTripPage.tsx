@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import GroupTripForm from '../components/trip/GroupTripForm';
 import ResultView from '../components/trip/ResultView';
@@ -10,10 +10,25 @@ import { generateOptimalRoute } from '../utils/routeOptimizer';
  */
 const GroupTripPage = () => {
   const navigate = useNavigate();
+  const STORAGE_KEY = 'groupTripLast';
   const [loading, setLoading] = useState(false);
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
+  
+  // 初回ロードで復元
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed: TripInfo = JSON.parse(saved);
+        if (parsed.startDate) parsed.startDate = new Date(parsed.startDate);
+        if (parsed.endDate) parsed.endDate = new Date(parsed.endDate);
+        if (parsed.lastUpdated) parsed.lastUpdated = new Date(parsed.lastUpdated);
+        setTripInfo(parsed);
+      }
+    } catch {}
+  }, []);
   
   // 旅程生成処理
   const handleFormSubmit = async (formData: TripInfo) => {
@@ -34,6 +49,7 @@ const GroupTripPage = () => {
       setTripInfo(updatedTripInfo);
       setShowAddLocationForm(false);
       setShowEditForm(false);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTripInfo));} catch {}
     } catch (error) {
       console.error('Failed to generate itinerary:', error);
       alert('旅程の生成に失敗しました。入力内容を確認してください。');
@@ -47,6 +63,7 @@ const GroupTripPage = () => {
     setTripInfo(null);
     setShowAddLocationForm(false);
     setShowEditForm(false);
+    try { localStorage.removeItem(STORAGE_KEY);} catch {}
   };
   
   // 希望地を追加するフォームを表示
