@@ -3,7 +3,7 @@ import type { Itinerary, TripInfo } from '../../types';
 import MapView from './MapView';
 import VisualFlow from './VisualFlow';
 import CalendarView from './CalendarView';
-import { shareTripInfo } from '../../services/tripShareService';
+import { shareTripInfo, exportTripData } from '../../services/tripShareService';
 
 interface ResultViewProps {
   tripInfo: TripInfo;
@@ -18,9 +18,11 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
   const { members, generatedItinerary } = tripInfo;
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [shareMethod, setShareMethod] = useState<'code' | 'url' | 'direct'>('code');
   
   if (!generatedItinerary) {
     return (
@@ -43,18 +45,28 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
     try {
       console.log('ResultView: 共有処理開始', { tripName: tripInfo.name });
       
+      // 共有コード方式
       const code = shareTripInfo(tripInfo);
       setShareCode(code);
       
-      // 共有用URLを生成
+      // 共有用URLを生成（コード方式）
       const baseUrl = window.location.origin;
-      // パスを/shared/{code}に設定
       const shareUrl = `${baseUrl}/shared/${code}`;
       setShareUrl(shareUrl);
+      
+      // 直接データを含めた短いURL方式（圧縮データを使用）
+      try {
+        const compressedData = exportTripData(tripInfo);
+        const directUrl = `${baseUrl}/shared/${encodeURIComponent(compressedData)}`;
+        setCompressedUrl(directUrl);
+        console.log('圧縮データURL生成成功:', directUrl.substring(0, 50) + '...');
+      } catch (compressErr) {
+        console.error('圧縮データ生成エラー', compressErr);
+        setCompressedUrl(null);
+      }
+      
       setShareError(null);
-      
       console.log('ResultView: 共有処理完了', { code, shareUrl });
-      
       setIsShareModalOpen(true);
     } catch (error) {
       console.error('ResultView: 共有処理エラー', error);
@@ -83,13 +95,22 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
    * 共有URLをクリップボードにコピーする
    */
   const handleCopyUrl = () => {
-    if (shareUrl) {
+    if (shareMethod === 'url' && shareUrl) {
       try {
         navigator.clipboard.writeText(shareUrl);
         setCopyMessage('共有URLをコピーしました');
         setTimeout(() => setCopyMessage(null), 2000);
       } catch (error) {
         console.error('ResultView: URLコピーエラー', error);
+        setCopyMessage('URLのコピーに失敗しました。手動でコピーしてください。');
+      }
+    } else if (shareMethod === 'direct' && compressedUrl) {
+      try {
+        navigator.clipboard.writeText(compressedUrl);
+        setCopyMessage('直接共有URLをコピーしました');
+        setTimeout(() => setCopyMessage(null), 2000);
+      } catch (error) {
+        console.error('ResultView: 直接URL コピーエラー', error);
         setCopyMessage('URLのコピーに失敗しました。手動でコピーしてください。');
       }
     }
@@ -151,7 +172,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
             className="px-4 py-2 bg-black text-white rounded"
             onClick={handleShare}
           >
-            共有コードを生成
+            共有する
           </button>
           
           {onAddLocation && (
@@ -178,42 +199,93 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
               </div>
             ) : (
               <>
-                <p className="mb-4 text-black">以下の共有コードまたは共有URLを友人や家族に送信してください。彼らはこれを使って旅行計画に参加できます。</p>
+                <p className="mb-4 text-black">以下の共有方法から選択して、友人や家族に送信してください。</p>
                 
                 <div className="mb-4">
-                  <p className="text-sm font-medium text-black mb-1">共有コード:</p>
-                  <div className="flex">
-                    <input
-                      type="text"
-                      value={shareCode || ''}
-                      readOnly
-                      className="flex-grow border border-black rounded-l p-2 text-black bg-white"
-                    />
+                  <div className="flex border-b border-gray-200 mb-4">
                     <button
-                      onClick={handleCopyCode}
-                      className="bg-black text-white px-4 py-2 rounded-r"
+                      className={`py-2 px-4 ${shareMethod === 'code' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
+                      onClick={() => setShareMethod('code')}
                     >
-                      コピー
+                      共有コード
+                    </button>
+                    <button
+                      className={`py-2 px-4 ${shareMethod === 'url' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
+                      onClick={() => setShareMethod('url')}
+                    >
+                      共有URL
+                    </button>
+                    <button
+                      className={`py-2 px-4 ${shareMethod === 'direct' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
+                      onClick={() => setShareMethod('direct')}
+                      disabled={!compressedUrl}
+                    >
+                      直接URL
                     </button>
                   </div>
-                </div>
-                
-                <div className="mb-6">
-                  <p className="text-sm font-medium text-black mb-1">共有URL:</p>
-                  <div className="flex">
-                    <input
-                      type="text"
-                      value={shareUrl || ''}
-                      readOnly
-                      className="flex-grow border border-black rounded-l p-2 text-black bg-white"
-                    />
-                    <button
-                      onClick={handleCopyUrl}
-                      className="bg-black text-white px-4 py-2 rounded-r"
-                    >
-                      コピー
-                    </button>
-                  </div>
+                  
+                  {shareMethod === 'code' && (
+                    <>
+                      <p className="text-sm font-medium text-black mb-1">共有コード:</p>
+                      <div className="flex">
+                        <input
+                          type="text"
+                          value={shareCode || ''}
+                          readOnly
+                          className="flex-grow border border-black rounded-l p-2 text-black bg-white"
+                        />
+                        <button
+                          onClick={handleCopyCode}
+                          className="bg-black text-white px-4 py-2 rounded-r"
+                        >
+                          コピー
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">※ 共有コードを受け取った人は「旅行に参加」から入力できます</p>
+                    </>
+                  )}
+                  
+                  {shareMethod === 'url' && (
+                    <>
+                      <p className="text-sm font-medium text-black mb-1">共有URL:</p>
+                      <div className="flex">
+                        <input
+                          type="text"
+                          value={shareUrl || ''}
+                          readOnly
+                          className="flex-grow border border-black rounded-l p-2 text-black bg-white text-xs"
+                        />
+                        <button
+                          onClick={handleCopyUrl}
+                          className="bg-black text-white px-4 py-2 rounded-r"
+                        >
+                          コピー
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">※ URLを受け取った人はリンクをクリックするだけで参加できます</p>
+                    </>
+                  )}
+                  
+                  {shareMethod === 'direct' && (
+                    <>
+                      <p className="text-sm font-medium text-black mb-1">直接共有URL（最短）:</p>
+                      <div className="flex">
+                        <input
+                          type="text"
+                          value={compressedUrl || ''}
+                          readOnly
+                          className="flex-grow border border-black rounded-l p-2 text-black bg-white text-xs"
+                        />
+                        <button
+                          onClick={handleCopyUrl}
+                          className="bg-black text-white px-4 py-2 rounded-r"
+                        >
+                          コピー
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">※ 最も簡単な方法ですが、一部環境では正しく動作しない場合があります</p>
+                    </>
+                  )}
                 </div>
                 
                 {copyMessage && (

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { TripInfo, SharedTripInfo, Participant } from '../types';
+import { compressToURI, decompressFromURI } from '../utils/compression';
 
 // ローカルストレージのキー
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
@@ -90,6 +91,40 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
 };
 
 /**
+ * 旅行情報を共有データとしてエクスポート（直接URLに含めるデータ）
+ * 新方式: 圧縮ユーティリティを使用
+ * @param tripInfo 共有する旅行情報
+ * @returns 圧縮されたデータ文字列
+ */
+export const exportTripData = (tripInfo: TripInfo): string => {
+  try {
+    // 最小限のデータに変換（サイズ削減のため）
+    const minimalTripInfo = {
+      ...tripInfo,
+      id: tripInfo.id,
+      name: tripInfo.name,
+      members: tripInfo.members,
+      departureLocation: tripInfo.departureLocation,
+      startDate: tripInfo.startDate,
+      endDate: tripInfo.endDate,
+      desiredLocations: tripInfo.desiredLocations,
+      tripType: tripInfo.tripType,
+      lastUpdated: new Date()
+    };
+    
+    // 圧縮ユーティリティを使用
+    return compressToURI(minimalTripInfo);
+  } catch (error) {
+    console.error('旅行データのエクスポート中にエラーが発生しました:', error);
+    // エラー時は最低限の情報のみを含む
+    if (tripInfo && tripInfo.id && tripInfo.name) {
+      return `minimal:${tripInfo.id}:${encodeURIComponent(tripInfo.name)}`;
+    }
+    throw error;
+  }
+};
+
+/**
  * 共有コードを使用して旅行情報を取得
  * @param shareCode 共有コード
  * @returns 旅行情報（存在しない場合はnull）
@@ -110,9 +145,51 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
       return tripInfo;
     }
     
-    console.log(`通常の共有コードでは見つかりませんでした。Base64デコードを試行: ${shareCode}`);
+    console.log(`通常の共有コードでは見つかりませんでした。データ解凍を試行: ${shareCode.substring(0, 20)}...`);
     
-    // 2. 古い形式のBase64エンコードされたデータとして試行
+    // 2. データ復元を試行（新しい圧縮形式）
+    try {
+      // 圧縮データを解凍
+      const tripInfo = decompressFromURI(shareCode);
+      console.log('圧縮データを正常に解凍しました', tripInfo);
+      
+      // データ検証
+      if (!tripInfo || !tripInfo.id || !tripInfo.name) {
+        console.error('解凍されたデータが不完全です');
+        return null;
+      }
+      
+      // 日付の修正
+      if (tripInfo.startDate && !(tripInfo.startDate instanceof Date)) {
+        tripInfo.startDate = new Date(tripInfo.startDate);
+      }
+      
+      if (tripInfo.endDate && !(tripInfo.endDate instanceof Date)) {
+        tripInfo.endDate = new Date(tripInfo.endDate);
+      }
+      
+      // 新しい共有コードを生成
+      const newShareCode = generateShortCode(tripInfo.id + tripInfo.name + new Date().toISOString());
+      tripInfo.shareCode = newShareCode;
+      
+      // 保存
+      const sharedTripInfo: SharedTripInfo = {
+        shareCode: newShareCode,
+        tripInfo,
+        createdAt: new Date(),
+        lastUpdated: new Date()
+      };
+      
+      sharedTrips[newShareCode] = sharedTripInfo;
+      saveSharedTrips(sharedTrips);
+      
+      console.log(`圧縮データから復元された旅行情報を保存しました: ${newShareCode}`);
+      return tripInfo;
+    } catch (e) {
+      console.error('データ解凍失敗:', e);
+    }
+    
+    // 3. 古い形式のBase64エンコードされたデータとして試行
     try {
       // URLデコード
       const decodedShareCode = decodeURIComponent(shareCode);
