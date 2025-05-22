@@ -42,6 +42,29 @@ export function determineTransportType(from: Location, to: Location): 'air' | 'l
     return 'air';
   }
   
+  // 海を跨ぐ場合は空路に（国や地域が異なり、かつ一定距離以上離れている場合）
+  const isDifferentCountry = from.country !== to.country && from.country && to.country;
+  const isDifferentRegion = from.region !== to.region && from.region && to.region;
+  
+  // 特定の国間の組み合わせで海を跨ぐと判断（例：日本と他の国など島国と大陸間）
+  const islandCountries = ['日本', 'Japan', 'イギリス', 'UK', 'United Kingdom', 'アイルランド', 'Ireland', 
+                           'フィリピン', 'Philippines', 'インドネシア', 'Indonesia', 'オーストラリア', 'Australia', 
+                           'ニュージーランド', 'New Zealand', '台湾', 'Taiwan'];
+  
+  const isIslandCountry = (country?: string) => {
+    if (!country) return false;
+    return islandCountries.some(island => country.includes(island));
+  };
+  
+  const hasSea = (isDifferentCountry && distance > 100) || 
+                 (isDifferentRegion && distance > 300) || 
+                 (isIslandCountry(from.country) && isDifferentCountry) || 
+                 (isIslandCountry(to.country) && isDifferentCountry);
+  
+  if (hasSea) {
+    return 'air';
+  }
+  
   // 700km以上の距離は強制的に空路に
   if (distance >= 700) {
     return 'air';
