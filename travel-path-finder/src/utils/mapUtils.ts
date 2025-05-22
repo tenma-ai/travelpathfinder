@@ -42,35 +42,70 @@ export function determineTransportType(from: Location, to: Location): 'air' | 'l
     return 'air';
   }
   
+  // デバッグ情報
+  console.log(`Transport between: ${from.name}(${from.country}) -> ${to.name}(${to.country}), distance: ${distance}km`);
+  
   // 海を跨ぐ場合は空路に（国や地域が異なり、かつ一定距離以上離れている場合）
   const isDifferentCountry = from.country !== to.country && from.country && to.country;
   const isDifferentRegion = from.region !== to.region && from.region && to.region;
   
   // 特定の国間の組み合わせで海を跨ぐと判断（例：日本と他の国など島国と大陸間）
   const islandCountries = ['日本', 'Japan', 'イギリス', 'UK', 'United Kingdom', 'アイルランド', 'Ireland', 
-                           'フィリピン', 'Philippines', 'インドネシア', 'Indonesia', 'オーストラリア', 'Australia', 
-                           'ニュージーランド', 'New Zealand', '台湾', 'Taiwan'];
+                          'フィリピン', 'Philippines', 'インドネシア', 'Indonesia', 'オーストラリア', 'Australia', 
+                          'ニュージーランド', 'New Zealand', '台湾', 'Taiwan'];
+  
+  // 常に空路になるべき国のペア（例：中国と台湾）
+  const alwaysAirCountryPairs = [
+    ['中国', '台湾'],
+    ['China', 'Taiwan'],
+    ['中国', 'Taiwan'],
+    ['China', '台湾']
+  ];
   
   const isIslandCountry = (country?: string) => {
     if (!country) return false;
     return islandCountries.some(island => country.includes(island));
   };
   
+  const isAlwaysAirCountryPair = () => {
+    if (!from.country || !to.country) return false;
+    
+    // 両方向でチェック
+    return alwaysAirCountryPairs.some(pair => 
+      (from.country?.includes(pair[0]) && to.country?.includes(pair[1])) || 
+      (from.country?.includes(pair[1]) && to.country?.includes(pair[0]))
+    );
+  };
+  
   const hasSea = (isDifferentCountry && distance > 100) || 
                  (isDifferentRegion && distance > 300) || 
                  (isIslandCountry(from.country) && isDifferentCountry) || 
-                 (isIslandCountry(to.country) && isDifferentCountry);
+                 (isIslandCountry(to.country) && isDifferentCountry) ||
+                 isAlwaysAirCountryPair();
   
   if (hasSea) {
+    console.log(`  Determined as AIR due to sea crossing`);
     return 'air';
   }
   
   // 700km以上の距離は強制的に空路に
   if (distance >= 700) {
+    console.log(`  Determined as AIR due to long distance (${distance}km)`);
+    return 'air';
+  }
+  
+  // 台湾・香港・マカオへの移動は常に空路に
+  const specialRegions = ['台湾', 'Taiwan', '香港', 'Hong Kong', 'マカオ', 'Macao', 'Macau'];
+  if ((from.country && specialRegions.some(region => from.country?.includes(region))) ||
+      (to.country && specialRegions.some(region => to.country?.includes(region))) ||
+      (from.name && specialRegions.some(region => from.name?.includes(region))) ||
+      (to.name && specialRegions.some(region => to.name?.includes(region)))) {
+    console.log(`  Determined as AIR due to special region (Taiwan/Hong Kong/Macao)`);
     return 'air';
   }
   
   // それ以外は陸路
+  console.log(`  Determined as LAND transportation`);
   return 'land';
 }
 
