@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 /**
  * 複数人の希望を考慮した最適ルートを生成
  */
-export function generateOptimalRoute(tripInfo: TripInfo): Itinerary {
+export async function generateOptimalRoute(tripInfo: TripInfo): Promise<Itinerary> {
   const { members, desiredLocations, departureLocation, startDate, endDate, returnToDeparture } = tripInfo;
   
   // 1. データの前処理と検証
@@ -20,10 +20,10 @@ export function generateOptimalRoute(tripInfo: TripInfo): Itinerary {
     throw new Error('有効な旅程を生成できませんでした。旅行期間を延長するか、希望地を減らしてください。');
   }
   
-  // 同期的にルートを生成（サーバーレス関数用に簡略化）
-  const scoredCombinations = locationCombinations.map((combo, index) => {
+  // 3. 各候補に対してスコアを計算
+  const scoredCombinationsPromises = locationCombinations.map(async (combo, index) => {
     try {
-      const itinerary = createItinerarySync(combo, tripInfo);
+      const itinerary = await createItinerary(combo, tripInfo);
       
       // 各メンバーが少なくとも1つの希望地を訪問できているか確認
       const memberVisitCounts = new Map<string, number>();
@@ -51,7 +51,9 @@ export function generateOptimalRoute(tripInfo: TripInfo): Itinerary {
       console.error(`Combination ${index} failed:`, error);
       return null;
     }
-  }).filter(result => result !== null);
+  });
+  
+  const scoredCombinations = (await Promise.all(scoredCombinationsPromises)).filter(result => result !== null);
   
   if (scoredCombinations.length === 0) {
     throw new Error('有効な旅程を生成できませんでした。旅行期間を延長するか、希望地を減らしてください。');
@@ -319,123 +321,319 @@ function generateLocationCombinations(tripInfo: TripInfo): DesiredLocation[][] {
 }
 
 /**
- * 同期版の旅程作成関数（サーバーレス環境用に簡略化）
+ * 旅程を生成
  */
-function createItinerarySync(selectedLocations: DesiredLocation[], tripInfo: TripInfo): Itinerary {
-  const { departureLocation, startDate, returnToDeparture } = tripInfo;
+async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: TripInfo): Promise<Itinerary> {
+  const { departureLocation, startDate, endDate, returnToDeparture } = tripInfo;
   
-  // 移動順序の最適化
-  const optimizedLocations = optimizeRouteOrder(departureLocation, selectedLocations, returnToDeparture);
-  
-  // 旅程を構築
-  const itinerary: Itinerary = {
-    id: uuidv4(),
-    locations: [],
-    routes: []
-  };
-  
-  // 旅程に出発地点を追加
-  const departureItineraryLocation: ItineraryLocation = {
-    id: uuidv4(),
-    location: departureLocation,
-    arrivalDate: new Date(startDate),
-    departureDate: new Date(startDate),
-    originalRequesters: []
-  };
-  
-  itinerary.locations.push(departureItineraryLocation);
+  const itineraryId = uuidv4();
+  const itineraryLocations: ItineraryLocation[] = [];
+  const routes: Route[] = [];
   
   let currentDate = new Date(startDate);
-  let currentLocation = departureItineraryLocation;
+  let prevLocation: Location = departureLocation;
   
-  // 各希望地を訪問
-  for (const desiredLocation of optimizedLocations) {
-    // 前の場所から現在の場所への移動を計算
-    const distance = calculateDistance(
-      currentLocation.location.coordinates,
-      desiredLocation.location.coordinates
-    );
+  // 出発地を追加
+  const departureItineraryLoc: ItineraryLocation = {
+    id: uuidv4(),
+    location: departureLocation,
+    arrivalDate: new Date(currentDate),
+    departureDate: new Date(currentDate),
+    originalRequesters: []
+  };
+  itineraryLocations.push(departureItineraryLoc);
+  
+  // 各希望地を順に追加
+  for (const desiredLoc of selectedLocations) {
+    // 前の場所から現在の場所への移動手段を決定
+    const transportType = determineTransportType(prevLocation, desiredLoc.location);
     
-    const transportType = determineTransportType(distance);
-    const travelHours = estimateTransportDuration(distance, transportType);
-    const travelMinutes = Math.ceil(travelHours * 60);
+    // 空路の場合は最寄りの空港経由のルート
+    if (transportType === 'air') {
+      // 空港経由のルートを取得
+      const airportRoute = await createAirRouteWithAirports(prevLocation, desiredLoc.location);
+      
+      // 各区間の移動時間を計算し、区間ごとの移動手段を設定
+      let currentPosition = prevLocation;
+      let accumulatedTravelHours = 0;
+      
+      // 出発地→出発空港、到着空港→目的地は陸路
+      // 出発空港→到着空港は空路
+      for (let i = 1; i < airportRoute.length; i++) {
+        const nextPosition = airportRoute[i];
+        // 現在地と次の地点の両方が空港名を含む場合のみ空路と判定
+        const fromLocation = i > 0 ? airportRoute[i-1] : null;
+        const toLocation = nextPosition;
+        
+        // fromLocationとtoLocationの両方が空港であれば空路
+        const isAirportToAirport = 
+          fromLocation && 
+          (fromLocation.name.includes('空港') || fromLocation.name.toLowerCase().includes('airport')) &&
+          (toLocation.name.includes('空港') || toLocation.name.toLowerCase().includes('airport'));
+          
+        const segmentTransportType = isAirportToAirport ? 'air' : 'land';
+        
+        // 移動時間を計算
+        const segmentTravelDuration = estimateTransportDuration(
+          currentPosition, 
+          nextPosition, 
+          segmentTransportType
+        );
+        
+        // 移動時間を加算
+        accumulatedTravelHours += segmentTravelDuration;
+        
+        // 中間地点（空港）の場合
+        if (i < airportRoute.length - 1) {
+          // 中間地点（空港）を旅程に追加
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          const intermediateDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+          
+          const intermediateLoc: ItineraryLocation = {
+            id: uuidv4(),
+            location: nextPosition,
+            arrivalDate: new Date(intermediateDate),
+            departureDate: new Date(intermediateDate), // 空港での滞在はなし
+            originalRequesters: []
+          };
+          
+          // 移動ルートの作成
+          const route: Route = {
+            id: uuidv4(),
+            from: itineraryLocations[itineraryLocations.length - 1].id,
+            to: intermediateLoc.id,
+            transportType: segmentTransportType,
+            estimatedDuration: segmentTravelDuration
+          };
+          
+          itineraryLocations.push(intermediateLoc);
+          routes.push(route);
+        } 
+        // 最終地点（目的地）の場合
+        else {
+          // 全移動時間を使って目的地の到着日を設定
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+          
+          // 当該場所の滞在期間
+          const arrivalDate = new Date(currentDate);
+          const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 60 * 60 * 1000);
+          
+          // 旅程地点の作成
+          const itineraryLoc: ItineraryLocation = {
+            id: uuidv4(),
+            location: desiredLoc.location,
+            arrivalDate,
+            departureDate,
+            originalRequesters: desiredLoc.requesters
+          };
+          
+          // 移動ルートの作成
+          const route: Route = {
+            id: uuidv4(),
+            from: itineraryLocations[itineraryLocations.length - 1].id,
+            to: itineraryLoc.id,
+            transportType: segmentTransportType,
+            estimatedDuration: segmentTravelDuration
+          };
+          
+          itineraryLocations.push(itineraryLoc);
+          routes.push(route);
+          
+          // 次の場所の開始日を設定
+          currentDate = new Date(departureDate);
+        }
+        
+        // 現在位置を更新
+        currentPosition = nextPosition;
+      }
+    } 
+    // 陸路の場合は従来通りの直接移動
+    else {
+      // 移動時間を計算
+      const travelDuration = estimateTransportDuration(prevLocation, desiredLoc.location, transportType);
+      
+      // 移動時間を加算
+      const hoursSinceStart = Math.floor(travelDuration);
+      currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+      
+      // 当該場所の滞在期間
+      const arrivalDate = new Date(currentDate);
+      const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 60 * 60 * 1000);
+      
+      // 旅程地点の作成
+      const itineraryLoc: ItineraryLocation = {
+        id: uuidv4(),
+        location: desiredLoc.location,
+        arrivalDate,
+        departureDate,
+        originalRequesters: desiredLoc.requesters
+      };
+      
+      // 移動ルートの作成
+      const route: Route = {
+        id: uuidv4(),
+        from: itineraryLocations[itineraryLocations.length - 1].id,
+        to: itineraryLoc.id,
+        transportType,
+        estimatedDuration: travelDuration
+      };
+      
+      itineraryLocations.push(itineraryLoc);
+      routes.push(route);
+      
+      // 次の場所の開始日を設定
+      currentDate = new Date(departureDate);
+    }
     
-    // 移動時間を加算して到着日時を計算
-    const arrivalDate = new Date(currentDate);
-    arrivalDate.setMinutes(arrivalDate.getMinutes() + travelMinutes);
-    
-    // 滞在期間を加算して出発日時を計算
-    const departureDate = new Date(arrivalDate);
-    departureDate.setHours(departureDate.getHours() + desiredLocation.stayDuration);
-    
-    // ルートを作成
-    const route: Route = {
-      id: uuidv4(),
-      from: currentLocation.id,
-      to: uuidv4(), // 仮ID（後で更新）
-      distance,
-      transportType,
-      duration: travelHours
-    };
-    
-    // 旅程に希望地を追加
-    const itineraryLocation: ItineraryLocation = {
-      id: route.to,
-      location: desiredLocation.location,
-      arrivalDate,
-      departureDate,
-      originalRequesters: desiredLocation.requesters,
-      priority: desiredLocation.priority
-    };
-    
-    itinerary.locations.push(itineraryLocation);
-    itinerary.routes.push(route);
-    
-    // 次の移動のための情報を更新
-    currentDate = new Date(departureDate);
-    currentLocation = itineraryLocation;
+    prevLocation = desiredLoc.location;
   }
   
   // 出発地に戻る場合
   if (returnToDeparture) {
-    // 最後の場所から出発地への移動を計算
-    const distance = calculateDistance(
-      currentLocation.location.coordinates,
-      departureLocation.coordinates
-    );
+    const lastLoc = itineraryLocations[itineraryLocations.length - 1].location;
+    const transportType = determineTransportType(lastLoc, departureLocation);
     
-    const transportType = determineTransportType(distance);
-    const travelHours = estimateTransportDuration(distance, transportType);
-    const travelMinutes = Math.ceil(travelHours * 60);
-    
-    // 移動時間を加算して到着日時を計算
-    const arrivalDate = new Date(currentDate);
-    arrivalDate.setMinutes(arrivalDate.getMinutes() + travelMinutes);
-    
-    // ルートを作成
-    const route: Route = {
-      id: uuidv4(),
-      from: currentLocation.id,
-      to: uuidv4(),
-      distance,
-      transportType,
-      duration: travelHours
-    };
-    
-    // 旅程に出発地を再追加
-    const returnLocation: ItineraryLocation = {
-      id: route.to,
-      location: departureLocation,
-      arrivalDate,
-      departureDate: arrivalDate, // 戻ったらそこで終わり
-      originalRequesters: []
-    };
-    
-    itinerary.locations.push(returnLocation);
-    itinerary.routes.push(route);
+    // 空路の場合は最寄りの空港経由のルート
+    if (transportType === 'air') {
+      // 空港経由のルートを取得
+      const airportRoute = await createAirRouteWithAirports(lastLoc, departureLocation);
+      
+      // 各区間の移動時間を計算し、区間ごとの移動手段を設定
+      let currentPosition = lastLoc;
+      let accumulatedTravelHours = 0;
+      
+      for (let i = 1; i < airportRoute.length; i++) {
+        const nextPosition = airportRoute[i];
+        // 現在地と次の地点の両方が空港名を含む場合のみ空路と判定
+        const fromLocation = i > 0 ? airportRoute[i-1] : null;
+        const toLocation = nextPosition;
+        
+        // fromLocationとtoLocationの両方が空港であれば空路
+        const isAirportToAirport = 
+          fromLocation && 
+          (fromLocation.name.includes('空港') || fromLocation.name.toLowerCase().includes('airport')) &&
+          (toLocation.name.includes('空港') || toLocation.name.toLowerCase().includes('airport'));
+          
+        const segmentTransportType = isAirportToAirport ? 'air' : 'land';
+        
+        // 移動時間を計算
+        const segmentTravelDuration = estimateTransportDuration(
+          currentPosition, 
+          nextPosition, 
+          segmentTransportType
+        );
+        
+        // 移動に必要な時間を加算
+        accumulatedTravelHours += segmentTravelDuration;
+        
+        // 中間地点（空港）の場合
+        if (i < airportRoute.length - 1) {
+          // 中間地点（空港）を旅程に追加
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          const intermediateDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+          
+          const intermediateLoc: ItineraryLocation = {
+            id: uuidv4(),
+            location: nextPosition,
+            arrivalDate: new Date(intermediateDate),
+            departureDate: new Date(intermediateDate), // 空港での滞在はなし
+            originalRequesters: []
+          };
+          
+          // 移動ルートの作成
+          const route: Route = {
+            id: uuidv4(),
+            from: itineraryLocations[itineraryLocations.length - 1].id,
+            to: intermediateLoc.id,
+            transportType: segmentTransportType,
+            estimatedDuration: segmentTravelDuration
+          };
+          
+          itineraryLocations.push(intermediateLoc);
+          routes.push(route);
+        } 
+        // 最終地点（出発地）の場合
+        else {
+          // 全移動時間を使って目的地の到着日を設定
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+          
+          // 出発地に戻る
+          const returnLoc: ItineraryLocation = {
+            id: uuidv4(),
+            location: departureLocation,
+            arrivalDate: new Date(currentDate),
+            departureDate: new Date(currentDate),
+            originalRequesters: []
+          };
+          
+          // 移動ルートの作成
+          const route: Route = {
+            id: uuidv4(),
+            from: itineraryLocations[itineraryLocations.length - 1].id,
+            to: returnLoc.id,
+            transportType: segmentTransportType,
+            estimatedDuration: segmentTravelDuration
+          };
+          
+          itineraryLocations.push(returnLoc);
+          routes.push(route);
+        }
+        
+        // 現在位置を更新
+        currentPosition = nextPosition;
+      }
+    }
+    // 陸路の場合は従来通りの直接移動
+    else {
+      const travelDuration = estimateTransportDuration(lastLoc, departureLocation, transportType);
+      const hoursSinceStart = Math.floor(travelDuration);
+      
+      currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
+      
+      const returnLoc: ItineraryLocation = {
+        id: uuidv4(),
+        location: departureLocation,
+        arrivalDate: new Date(currentDate),
+        departureDate: new Date(currentDate),
+        originalRequesters: []
+      };
+      
+      const returnRoute: Route = {
+        id: uuidv4(),
+        from: itineraryLocations[itineraryLocations.length - 1].id,
+        to: returnLoc.id,
+        transportType,
+        estimatedDuration: travelDuration
+      };
+      
+      itineraryLocations.push(returnLoc);
+      routes.push(returnRoute);
+    }
   }
   
-  return itinerary;
+  // 終了日が指定されている場合、旅程が終了日を超えていないか確認
+  if (endDate) {
+    const lastLocation = itineraryLocations[itineraryLocations.length - 1];
+    const scheduledEndDate = lastLocation.arrivalDate;
+    
+    // 旅程が終了日を超える場合はエラー
+    if (scheduledEndDate > endDate) {
+      console.error('この組み合わせでは旅程が終了日を超えてしまいます。選択された希望地:', selectedLocations.length);
+      throw new Error('この組み合わせでは旅程が終了日を超えてしまいます。');
+    }
+  }
+  
+  // メンバー満足度スコアを計算
+  const memberSatisfactionScores = calculateMemberSatisfactionScores(tripInfo.members, selectedLocations, itineraryLocations);
+  
+  return {
+    id: itineraryId,
+    locations: itineraryLocations,
+    routes,
+    memberSatisfactionScores
+  };
 }
 
 /**
@@ -480,7 +678,7 @@ function calculateEfficiencyScore(itinerary: Itinerary): number {
       // 地点間の距離を計算
       const distance = calculateDistance(fromLoc.location.coordinates, toLoc.location.coordinates);
       totalDistance += distance;
-      totalDuration += route.duration || 0; // durationがundefinedの場合は0を使用
+      totalDuration += route.estimatedDuration;
     }
   }
   
