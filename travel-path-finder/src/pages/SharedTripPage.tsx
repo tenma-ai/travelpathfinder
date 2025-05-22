@@ -1,20 +1,22 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getTripInfoByShareCode } from '../services/tripShareService';
+import { getTripInfoByShareCode, getTripInfoByShareCodeAsync } from '../services/tripShareService';
+import { generateOptimalRoute } from '../services/routeOptimizationService';
+import ItineraryResult from '../components/ItineraryResult';
+import AddTripLocationForm from '../components/AddTripLocationForm';
+import LoadingSpinner from '../components/LoadingSpinner';
 import type { TripInfo } from '../types';
-import ResultView from '../components/trip/ResultView';
-import SoloTripForm from '../components/trip/SoloTripForm';
-import GroupTripForm from '../components/trip/GroupTripForm';
-import { generateOptimalRoute } from '../utils/routeOptimizer';
 
 /**
- * 共有された旅行ページ
+ * 共有された旅行の表示と編集を行うページ
+ * クラウドストレージ対応版
  */
 const SharedTripPage = () => {
-  const { shareCode } = useParams<{ shareCode: string }>();
+  const { shareCode = '' } = useParams<{ shareCode: string }>();
   const navigate = useNavigate();
-  const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
+  
   const [loading, setLoading] = useState(true);
+  const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
@@ -48,8 +50,8 @@ const SharedTripPage = () => {
           hasLocalStorage: typeof localStorage !== 'undefined'
         }));
         
-        // 共有コードからデータを取得
-        const loadedTripInfo = getTripInfoByShareCode(shareCode);
+        // 共有コードからデータを取得（非同期版を使用）
+        const loadedTripInfo = await getTripInfoByShareCodeAsync(shareCode);
         
         setDebugInfo(prev => ({ 
           ...prev, 
@@ -220,95 +222,171 @@ const SharedTripPage = () => {
     );
   }
 
-  // ロード中の表示
+  // ローディング表示
   if (loading) {
     return (
-      <div className="flex flex-col justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-black mb-4"></div>
-        <p className="text-lg">読み込み中...</p>
-        <p className="text-sm text-gray-500 mt-2">共有コード: {shareCode}</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
+        <LoadingSpinner size="large" />
+        <p className="mt-4 text-lg">旅行情報を読み込んでいます...</p>
       </div>
     );
   }
 
-  // 旅行情報が見つからない場合
+  // 旅行情報がない場合
   if (!tripInfo) {
     return (
-      <div className="min-h-screen bg-gray-50 py-8 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="bg-white p-6 rounded-lg shadow-md text-center">
-            <h2 className="text-2xl font-bold mb-4 text-red-500">旅行情報が見つかりません</h2>
-            <p className="mb-6">共有コード「{shareCode}」に対応する旅行情報が見つかりませんでした。</p>
-            <p className="mb-6 text-sm text-gray-600">
-              リンクが切れている可能性があります。正しい共有コードであることを確認してください。
-            </p>
-            
-            <div className="mb-6 p-4 bg-gray-100 rounded-lg text-left">
-              <h3 className="font-bold mb-2">確認事項:</h3>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>URLが正しくコピーされているか確認してください</li>
-                <li>共有リンクが期限切れになっていないか確認してください</li>
-                <li>ブラウザのLocalStorageが有効になっているか確認してください</li>
-              </ul>
-            </div>
-            
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white p-6 rounded-lg shadow-md text-center">
+          <h2 className="text-2xl font-bold mb-4">旅行情報が見つかりませんでした</h2>
+          <p className="mb-6">指定された共有コードの旅行情報を取得できませんでした。</p>
+          <button
+            onClick={handleBackToHome}
+            className="px-4 py-2 bg-black text-white rounded"
+          >
+            ホームに戻る
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 旅程が生成されている場合は結果を表示
+  if (tripInfo.generatedItinerary) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-6xl mx-auto p-4">
+          <header className="flex justify-between items-center mb-6">
+            <button
+              onClick={handleEditButton}
+              className="px-4 py-2 border border-black rounded"
+            >
+              修正する
+            </button>
+            <h1 className="text-2xl font-bold">{tripInfo.name}</h1>
             <button
               onClick={handleBackToHome}
               className="px-4 py-2 bg-black text-white rounded"
             >
               ホームに戻る
             </button>
-          </div>
+          </header>
+          
+          <ItineraryResult tripInfo={tripInfo} onReset={handleReset} />
         </div>
       </div>
     );
   }
 
-  // 正常な表示
-  return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        <button
-          onClick={handleEditButton}
-          className="mb-6 flex items-center text-gray-600 hover:text-black"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-          </svg>
-          {showAddLocationForm ? "旅行計画に戻る" : tripInfo.generatedItinerary ? "修正する" : "戻る"}
-        </button>
+  // 追加地点フォームが表示されている場合
+  if (showAddLocationForm) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-6xl mx-auto p-4">
+          <header className="flex justify-between items-center mb-6">
+            <button
+              onClick={handleEditButton}
+              className="px-4 py-2 border border-black rounded"
+            >
+              戻る
+            </button>
+            <h1 className="text-2xl font-bold">希望地点を追加</h1>
+            <button
+              onClick={handleBackToHome}
+              className="px-4 py-2 bg-black text-white rounded"
+            >
+              ホームに戻る
+            </button>
+          </header>
+          
+          <AddTripLocationForm tripInfo={tripInfo} onSubmit={handleFormSubmit} />
+        </div>
+      </div>
+    );
+  }
 
-        {showAddLocationForm && tripInfo ? (
-          tripInfo.tripType === 'solo' ? (
-            <SoloTripForm
-              onSubmit={handleFormSubmit}
-              initialTripInfo={tripInfo}
-              isAddingLocation={true}
-            />
-          ) : (
-            <GroupTripForm
-              onSubmit={handleFormSubmit}
-              initialTripInfo={tripInfo}
-              isAddingLocation={true}
-            />
-          )
-        ) : tripInfo.generatedItinerary ? (
-          <ResultView
-            tripInfo={tripInfo}
-            onReset={handleReset}
-            onAddLocation={handleAddLocation}
-          />
-        ) : tripInfo.tripType === 'solo' ? (
-          <SoloTripForm
-            onSubmit={handleFormSubmit}
-            initialTripInfo={tripInfo}
-          />
-        ) : (
-          <GroupTripForm
-            onSubmit={handleFormSubmit}
-            initialTripInfo={tripInfo}
-          />
-        )}
+  // 旅行情報のみ表示（まだ旅程は生成されていない）
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-6xl mx-auto p-4">
+        <header className="flex justify-between items-center mb-6">
+          <button
+            onClick={handleBackToHome}
+            className="px-4 py-2 border border-black rounded"
+          >
+            戻る
+          </button>
+          <h1 className="text-2xl font-bold">{tripInfo.name}</h1>
+          <div></div> {/* 空のdivでフレックスレイアウトを整える */}
+        </header>
+        
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold mb-4">旅行情報</h2>
+          
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="font-bold mb-2">基本情報</h3>
+              <p><span className="font-medium">出発地:</span> {tripInfo.departureLocation.name}</p>
+              <p><span className="font-medium">開始日:</span> {tripInfo.startDate.toLocaleDateString()}</p>
+              {tripInfo.endDate && (
+                <p><span className="font-medium">終了日:</span> {tripInfo.endDate.toLocaleDateString()}</p>
+              )}
+            </div>
+            
+            <div>
+              <h3 className="font-bold mb-2">メンバー ({tripInfo.members.length}人)</h3>
+              <ul>
+                {tripInfo.members.map(member => (
+                  <li key={member.id} className="flex items-center mb-1">
+                    <span 
+                      className="w-4 h-4 rounded-full mr-2" 
+                      style={{ backgroundColor: member.color }}
+                    ></span>
+                    {member.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          
+          <div className="mt-6">
+            <h3 className="font-bold mb-2">
+              希望地点 ({tripInfo.desiredLocations.length}箇所)
+            </h3>
+            {tripInfo.desiredLocations.length > 0 ? (
+              <ul className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {tripInfo.desiredLocations.map(location => (
+                  <li key={location.id} className="border border-gray-200 rounded p-3">
+                    <div className="font-medium">{location.name}</div>
+                    <div className="text-sm text-gray-600">
+                      {location.memberIds.map(memberId => {
+                        const member = tripInfo.members.find(m => m.id === memberId);
+                        return member ? (
+                          <span 
+                            key={memberId}
+                            className="inline-block w-3 h-3 rounded-full mr-1" 
+                            style={{ backgroundColor: member.color }}
+                            title={member.name}
+                          ></span>
+                        ) : null;
+                      })}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500">まだ希望地点はありません。</p>
+            )}
+          </div>
+          
+          <div className="mt-8 flex justify-center">
+            <button
+              onClick={handleAddLocation}
+              className="px-6 py-3 bg-black text-white rounded-lg shadow hover:shadow-md transition-shadow"
+            >
+              希望地点を追加する
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
