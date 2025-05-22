@@ -40,7 +40,7 @@ const SoloTripPage = () => {
       // const itinerary = await generateOptimalRouteWithAI(formData);
       
       // 最適ルートをフロントエンドで計算
-      const itinerary = generateOptimalRoute(formData);
+      const itinerary = await generateOptimalRoute(formData);
       
       const updatedTripInfo = {
         ...formData,

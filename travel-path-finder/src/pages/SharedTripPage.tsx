@@ -84,12 +84,12 @@ const SharedTripPage = () => {
   };
 
   // フォーム送信処理
-  const handleFormSubmit = (formData: TripInfo) => {
+  const handleFormSubmit = async (formData: TripInfo) => {
     setLoading(true);
     
     try {
       console.log('SharedTripPage: 旅程生成開始', formData);
-      const itinerary = generateOptimalRoute(formData);
+      const itinerary = await generateOptimalRoute(formData);
       
       const updatedTripInfo = {
         ...formData,
