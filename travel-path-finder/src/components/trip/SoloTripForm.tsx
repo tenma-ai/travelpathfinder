@@ -30,7 +30,7 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
   const [desiredLocations, setDesiredLocations] = useState<DesiredLocation[]>(initialTripInfo?.desiredLocations || []);
   const [newLocationName, setNewLocationName] = useState('');
   const [newLocationSuggestions, setNewLocationSuggestions] = useState<string[]>([]);
-  const [newLocationDuration, setNewLocationDuration] = useState(1);
+  const [newLocationDuration, setNewLocationDuration] = useState(24); // 24時間(1日)をデフォルト値に
   const [newLocationPriority, setNewLocationPriority] = useState(3);
   
   // エラーメッセージ
@@ -157,7 +157,7 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
       setDesiredLocations(prev => [...prev, newDesiredLocation]);
       setNewLocationName('');
       setNewLocationSuggestions([]);
-      setNewLocationDuration(1);
+      setNewLocationDuration(24);
       setNewLocationPriority(3);
       
       setErrors(prev => {
@@ -245,6 +245,18 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
     // 直接追加ではなく、テキストフィールドに入力するだけにする
   };
   
+  // フォーマット関数
+  const formatDuration = (hours: number): string => {
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    
+    if (days > 0) {
+      return `${days}日${remainingHours > 0 ? ` ${remainingHours}時間` : ''}`;
+    }
+    
+    return `${remainingHours}時間`;
+  };
+
   return (
     <div className="bg-white p-6 rounded-lg shadow-md max-w-4xl mx-auto text-black">
       <h2 className="text-2xl font-bold mb-6 border-b pb-3 text-black">
@@ -389,7 +401,7 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
                     <div className="text-sm text-gray-600">
                       {loc.location.country && `${loc.location.country}`}
                       <span className="mx-2">•</span>
-                      滞在: {loc.stayDuration}日
+                      滞在: {formatDuration(loc.stayDuration)}
                       <span className="mx-2">•</span>
                       優先度: {loc.priority}
                     </div>
@@ -450,14 +462,41 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1 text-black">滞在日数</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={newLocationDuration}
-                  onChange={(e) => setNewLocationDuration(parseInt(e.target.value) || 1)}
-                  className="w-full border border-black rounded p-2 text-black bg-white"
-                />
+                <label className="block text-sm font-medium mb-1 text-black">滞在時間</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">日</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={Math.floor(newLocationDuration / 24)}
+                      onChange={(e) => {
+                        const days = parseInt(e.target.value) || 0;
+                        const hours = newLocationDuration % 24;
+                        setNewLocationDuration(days * 24 + hours);
+                      }}
+                      className="w-full border border-black rounded p-2 text-black bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">時間</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="23"
+                      value={newLocationDuration % 24}
+                      onChange={(e) => {
+                        const hours = parseInt(e.target.value) || 0;
+                        const days = Math.floor(newLocationDuration / 24);
+                        setNewLocationDuration(days * 24 + (hours % 24));
+                      }}
+                      className="w-full border border-black rounded p-2 text-black bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="text-xs text-gray-600 mt-1">
+                  合計: {formatDuration(newLocationDuration)}
+                </div>
               </div>
               
               <div>

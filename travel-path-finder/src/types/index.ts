@@ -21,7 +21,7 @@ export interface DesiredLocation {
   location: Location;
   requesters: string[]; // メンバーID配列
   priority: number; // 1-5のスケール
-  stayDuration: number; // 滞在希望日数
+  stayDuration: number; // 滞在希望時間（時間単位）
   specificDates?: [Date, Date]; // 特定の日付指定がある場合
 }
 

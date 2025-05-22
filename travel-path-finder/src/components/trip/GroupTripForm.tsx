@@ -33,7 +33,7 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
   const [desiredLocations, setDesiredLocations] = useState<DesiredLocation[]>(initialTripInfo?.desiredLocations || []);
   const [newLocationName, setNewLocationName] = useState('');
   const [newLocationSuggestions, setNewLocationSuggestions] = useState<string[]>([]);
-  const [newLocationDuration, setNewLocationDuration] = useState(1);
+  const [newLocationDuration, setNewLocationDuration] = useState(24); // 24時間(1日)をデフォルト値に
   const [newLocationPriority, setNewLocationPriority] = useState(3);
   const [newLocationRequesters, setNewLocationRequesters] = useState<string[]>([]);
   
@@ -45,6 +45,18 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
     const d = new Date(date);
     return d.toISOString().split('T')[0];
   }
+  
+  // フォーマット関数
+  const formatDuration = (hours: number): string => {
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    
+    if (days > 0) {
+      return `${days}日${remainingHours > 0 ? ` ${remainingHours}時間` : ''}`;
+    }
+    
+    return `${remainingHours}時間`;
+  };
   
   // 出発地の候補を取得
   useEffect(() => {
@@ -220,7 +232,7 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
       setDesiredLocations(prev => [...prev, newDesiredLocation]);
       setNewLocationName('');
       setNewLocationSuggestions([]);
-      setNewLocationDuration(1);
+      setNewLocationDuration(24);
       setNewLocationPriority(3);
       setNewLocationRequesters([]);
       
@@ -530,7 +542,7 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
                       <div className="text-sm text-gray-600">
                         {loc.location.country && `${loc.location.country}`}
                         <span className="mx-2">•</span>
-                        滞在: {loc.stayDuration}日
+                        滞在: {formatDuration(loc.stayDuration)}
                         <span className="mx-2">•</span>
                         優先度: {loc.priority}
                       </div>
@@ -613,14 +625,41 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-black">滞在日数</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newLocationDuration}
-                    onChange={(e) => setNewLocationDuration(parseInt(e.target.value) || 1)}
-                    className="w-full border border-black rounded p-2 text-black bg-white"
-                  />
+                  <label className="block text-sm font-medium mb-1 text-black">滞在時間</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">日</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={Math.floor(newLocationDuration / 24)}
+                        onChange={(e) => {
+                          const days = parseInt(e.target.value) || 0;
+                          const hours = newLocationDuration % 24;
+                          setNewLocationDuration(days * 24 + hours);
+                        }}
+                        className="w-full border border-black rounded p-2 text-black bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">時間</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="23"
+                        value={newLocationDuration % 24}
+                        onChange={(e) => {
+                          const hours = parseInt(e.target.value) || 0;
+                          const days = Math.floor(newLocationDuration / 24);
+                          setNewLocationDuration(days * 24 + (hours % 24));
+                        }}
+                        className="w-full border border-black rounded p-2 text-black bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    合計: {formatDuration(newLocationDuration)}
+                  </div>
                 </div>
                 
                 <div>
