@@ -99,18 +99,23 @@ const SharedTripPage = () => {
   /**
    * 希望地を追加して再計算
    */
-  const handleAddLocation = (updatedTripInfo: TripInfo) => {
-    // 最適ルートを再計算
-    const optimizedRoute = generateOptimalRoute(updatedTripInfo);
-    
-    // 旅行情報を更新
-    setTripInfo({
-      ...updatedTripInfo,
-      generatedItinerary: optimizedRoute
-    });
-    
-    // フォームを非表示
-    setShowAddLocationForm(false);
+  const handleAddLocation = async (updatedTripInfo: TripInfo) => {
+    try {
+      // 最適ルートを再計算（非同期）
+      const optimizedRoute = await generateOptimalRoute(updatedTripInfo);
+      
+      // 旅行情報を更新
+      setTripInfo({
+        ...updatedTripInfo,
+        generatedItinerary: optimizedRoute
+      });
+      
+      // フォームを非表示
+      setShowAddLocationForm(false);
+    } catch (error) {
+      console.error('ルート生成中にエラーが発生しました:', error);
+      setError(`ルート生成中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    }
   };
 
   if (loading) {
