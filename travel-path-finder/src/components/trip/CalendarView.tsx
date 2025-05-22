@@ -104,13 +104,13 @@ const CalendarView = ({ itinerary, members }: CalendarViewProps) => {
   };
   
   // 移動タイプのアイコン
-  const getTransportIcon = (type?: 'air' | 'land' | 'sea') => {
+  const TransportIcon = ({ type }: { type?: 'air' | 'land' | 'sea' }) => {
     if (type === 'air') {
-      return '✈️';
+      return <img src="/airplane.png" alt="飛行機" className="w-4 h-4" />;
     } else if (type === 'sea') {
-      return '🚢';
+      return <span>🚢</span>; // 海路のアイコンは変更なし
     } else {
-      return '🚗';
+      return <img src="/car.png" alt="車" className="w-4 h-4" />;
     }
   };
   
@@ -176,7 +176,7 @@ const CalendarView = ({ itinerary, members }: CalendarViewProps) => {
               
               {eventData.isTravel ? (
                 <div className="flex items-center text-sm">
-                  <span className="mr-1">{getTransportIcon(eventData.transportType)}</span>
+                  <span className="mr-1"><TransportIcon type={eventData.transportType} /></span>
                   <span className="font-medium">
                     {eventData.startLocation} → {eventData.endLocation}
                   </span>
