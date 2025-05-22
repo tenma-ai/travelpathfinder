@@ -4,7 +4,7 @@ import type { TripInfo, SharedTripInfo, Participant } from '../types';
 // ローカルストレージのキー
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
 
-// --- 追加: Unicode 文字列を安全に Base64 エンコード / デコードするユーティリティ ---
+// --- Base64エンコード/デコードユーティリティ ---
 const base64EncodeUnicode = (str: string): string => {
   // UTF-8 -> percent-encoding -> raw bytes -> Base64
   return btoa(unescape(encodeURIComponent(str)));
@@ -12,9 +12,39 @@ const base64EncodeUnicode = (str: string): string => {
 
 const base64DecodeUnicode = (base64: string): string => {
   // Base64 -> raw bytes -> percent-encoding -> UTF-8
-  return decodeURIComponent(escape(atob(base64)));
+  try {
+    return decodeURIComponent(escape(atob(base64)));
+  } catch (e) {
+    console.error('Base64デコードエラー:', e);
+    throw e;
+  }
 };
-// -----------------------------------------------------------------
+
+/**
+ * 短い共有コードを生成する
+ * @param input 入力文字列
+ * @returns 短い識別コード
+ */
+const generateShortCode = (input: string): string => {
+  // 簡易ハッシュ関数 (文字列に基づいた短いコードを生成)
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    const char = input.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // 32bit整数に変換
+  }
+  
+  // タイムスタンプを追加して一意性を高める
+  const timestamp = Date.now().toString(36);
+  
+  // ランダムな文字を追加
+  const randomPart = Math.random().toString(36).substr(2, 4);
+  
+  // 8文字のコードを生成 (ハッシュ+タイムスタンプ+ランダム)
+  return (Math.abs(hash).toString(36).substr(0, 3) + 
+          timestamp.substr(-3) + 
+          randomPart.substr(0, 2)).toUpperCase();
+};
 
 /**
  * 旅行情報を共有する
@@ -28,8 +58,9 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
     // 既存の共有旅行情報を取得
     const sharedTrips = getSharedTrips();
     
-    // ポータブルな共有コードを生成
-    const shareCode = generatePortableShareCode(tripInfo);
+    // シンプルな共有コードを生成 (タイムスタンプやIDに基づく固有コード)
+    const baseCodeInfo = tripInfo.id + tripInfo.name + new Date().toISOString();
+    const shareCode = generateShortCode(baseCodeInfo);
     
     // 最終更新日時を設定
     const lastUpdated = new Date();
@@ -68,6 +99,7 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
     console.log(`共有コード検索開始: ${shareCode}`);
     const sharedTrips = getSharedTrips();
     
+    // 1. まず通常の共有コードとして検索
     if (sharedTrips[shareCode]) {
       console.log(`共有コード発見: ${shareCode}`);
       
@@ -77,18 +109,44 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
       console.log('旅行情報を正常に取得・復元しました', tripInfo);
       return tripInfo;
     }
-
-    // ---------- 追加: Base64 エンコードされた共有データのデコード ----------
+    
+    console.log(`通常の共有コードでは見つかりませんでした。Base64デコードを試行: ${shareCode}`);
+    
+    // 2. 古い形式のBase64エンコードされたデータとして試行
     try {
-      const base64 = decodeURIComponent(shareCode);
-      const jsonStr = base64DecodeUnicode(base64);
+      // URLデコード
+      const decodedShareCode = decodeURIComponent(shareCode);
+      console.log(`URLデコード後: ${decodedShareCode.substring(0, 50)}...`);
+      
+      // Base64デコード
+      const jsonStr = base64DecodeUnicode(decodedShareCode);
+      console.log(`Base64デコード成功、長さ: ${jsonStr.length}`);
+      
+      // JSONパース
       const parsed: TripInfo = JSON.parse(jsonStr, dateReviver);
-      console.log('Base64 デコード成功', parsed);
+      console.log('古い形式の共有データを正常に解析しました');
+      
+      // 新しい形式に保存
+      const newShareCode = generateShortCode(parsed.id + parsed.name + new Date().toISOString());
+      parsed.shareCode = newShareCode;
+      
+      // 保存
+      const sharedTripInfo: SharedTripInfo = {
+        shareCode: newShareCode,
+        tripInfo: parsed,
+        createdAt: new Date(),
+        lastUpdated: new Date()
+      };
+      
+      sharedTrips[newShareCode] = sharedTripInfo;
+      saveSharedTrips(sharedTrips);
+      
+      console.log(`古い形式のデータを新形式(${newShareCode})に変換して保存しました`);
+      
       return parsed;
     } catch (e) {
-      console.log('Base64 デコード対象外または失敗');
+      console.error('Base64デコード失敗:', e);
     }
-    // -----------------------------------------------------------------
     
     console.log(`共有コード不明: ${shareCode}`);
     return null;
@@ -172,7 +230,7 @@ export const addDesiredLocation = (shareCode: string, desiredLocation: any): boo
 };
 
 /**
- * 共有コードを生成 (Base64 方式)
+ * 共有コードを生成 (Base64 方式) - 後方互換性のために残す
  * @param tripInfo 旅行情報
  * @returns ポータブルな共有コード
  */
