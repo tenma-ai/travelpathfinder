@@ -69,14 +69,37 @@ export async function findNearestAirport(coordinates: [number, number]): Promise
         { name: '中部国際空港（セントレア）', coordinates: [136.8049, 34.8583] },
         { name: '福岡空港', coordinates: [130.4514, 33.5902] }
       ],
-      // 世界の主要空港
-      'international': [
-        { name: 'Heathrow Airport', coordinates: [-0.4543, 51.4700] },
-        { name: 'Charles de Gaulle Airport', coordinates: [2.5479, 49.0097] },
+      // 北米の主要空港
+      'north_america': [
+        { name: 'John F. Kennedy International Airport', coordinates: [-73.7781, 40.6413] }, // ニューヨークJFK
+        { name: 'LaGuardia Airport', coordinates: [-73.8740, 40.7769] }, // ニューヨークLGA
+        { name: 'Newark Liberty International Airport', coordinates: [-74.1745, 40.6895] }, // ニュージャージー（ニューヨーク圏）
         { name: 'Los Angeles International Airport', coordinates: [-118.4085, 33.9416] },
+        { name: "O'Hare International Airport", coordinates: [-87.9073, 41.9742] }, // シカゴ
+        { name: 'San Francisco International Airport', coordinates: [-122.3789, 37.6213] },
+        { name: 'Miami International Airport', coordinates: [-80.2870, 25.7932] },
+        { name: 'Toronto Pearson International Airport', coordinates: [-79.6306, 43.6777] }
+      ],
+      // ヨーロッパの主要空港
+      'europe': [
+        { name: 'Heathrow Airport', coordinates: [-0.4543, 51.4700] }, // ロンドン
+        { name: 'Charles de Gaulle Airport', coordinates: [2.5479, 49.0097] }, // パリ
+        { name: 'Frankfurt Airport', coordinates: [8.5622, 50.0379] }, // フランクフルト
+        { name: 'Amsterdam Airport Schiphol', coordinates: [4.7634, 52.3105] }, // アムステルダム
+        { name: 'Madrid–Barajas Airport', coordinates: [-3.5669, 40.4983] } // マドリード
+      ],
+      // アジアの主要空港（日本以外）
+      'asia': [
         { name: 'Beijing Capital International Airport', coordinates: [116.5977, 40.0799] },
-        { name: 'Dubai International Airport', coordinates: [55.3657, 25.2532] },
-        { name: 'Sydney Airport', coordinates: [151.1772, 33.9399] }
+        { name: 'Hong Kong International Airport', coordinates: [113.9184, 22.3080] },
+        { name: 'Singapore Changi Airport', coordinates: [103.9915, 1.3644] },
+        { name: 'Incheon International Airport', coordinates: [126.4505, 37.4602] }, // ソウル
+        { name: 'Dubai International Airport', coordinates: [55.3657, 25.2532] }
+      ],
+      // オセアニアの主要空港
+      'oceania': [
+        { name: 'Sydney Airport', coordinates: [151.1772, 33.9399] },
+        { name: 'Melbourne Airport', coordinates: [144.8430, -37.6690] }
       ]
     };
     
@@ -85,13 +108,20 @@ export async function findNearestAirport(coordinates: [number, number]): Promise
       let closest = airports[0];
       let minDistance = calculateDistance(coordinates, closest.coordinates);
       
+      console.log(`空港検索情報: 地点[${coordinates}]から最寄りの空港を検索`);
+      console.log(`- 候補1: ${closest.name} (距離: ${minDistance.toFixed(2)}km)`);
+      
       for (let i = 1; i < airports.length; i++) {
         const distance = calculateDistance(coordinates, airports[i].coordinates);
+        console.log(`- 候補${i+1}: ${airports[i].name} (距離: ${distance.toFixed(2)}km)`);
+        
         if (distance < minDistance) {
           minDistance = distance;
           closest = airports[i];
         }
       }
+      
+      console.log(`→ 選択された空港: ${closest.name} (距離: ${minDistance.toFixed(2)}km)`);
       
       return {
         name: closest.name,
@@ -100,7 +130,13 @@ export async function findNearestAirport(coordinates: [number, number]): Promise
     };
     
     // バックアップから最寄りの空港を返す
-    const allAirports = [...fallbackAirports.japan, ...fallbackAirports.international] as Array<{ name: string, coordinates: [number, number] }>;
+    const allAirports = [
+      ...fallbackAirports.japan, 
+      ...fallbackAirports.north_america,
+      ...fallbackAirports.europe,
+      ...fallbackAirports.asia,
+      ...fallbackAirports.oceania
+    ] as Array<{ name: string, coordinates: [number, number] }>;
     return findClosest(allAirports);
   }
 }
