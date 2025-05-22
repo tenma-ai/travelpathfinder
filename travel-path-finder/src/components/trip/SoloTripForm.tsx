@@ -13,6 +13,9 @@ interface SoloTripFormProps {
  * 一人旅入力フォーム
  */
 const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: SoloTripFormProps) => {
+  // 下書きを保存するキー
+  const DRAFT_KEY = 'soloTripDraft';
+
   // 基本情報
   const [tripName, setTripName] = useState(initialTripInfo?.name || '');
   const [departureLocationName, setDepartureLocationName] = useState(initialTripInfo?.departureLocation?.name || '');
@@ -32,6 +35,49 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
   
   // エラーメッセージ
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+  // -------------------- 下書きの読み込み --------------------
+  useEffect(() => {
+    if (initialTripInfo || isAddingLocation) return; // 共有・追加モードでは下書きを無視
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const d = JSON.parse(saved);
+        setTripName(d.tripName || '');
+        setDepartureLocationName(d.departureLocationName || '');
+        setDepartureLocation(d.departureLocation || null);
+        setStartDate(d.startDate || '');
+        setEndDate(d.endDate || '');
+        setAutoEndDate(d.autoEndDate ?? false);
+        setReturnToDeparture(d.returnToDeparture ?? true);
+        setDesiredLocations(d.desiredLocations || []);
+      }
+    } catch (e) {
+      console.error('Failed to load draft', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // -------------------- 下書きの保存 --------------------
+  useEffect(() => {
+    // isAddingLocation の場合は保存しない
+    if (isAddingLocation) return;
+    const draft = {
+      tripName,
+      departureLocationName,
+      departureLocation,
+      startDate,
+      endDate,
+      autoEndDate,
+      returnToDeparture,
+      desiredLocations
+    };
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) {
+      console.error('Failed to save draft', e);
+    }
+  }, [tripName, departureLocationName, departureLocation, startDate, endDate, autoEndDate, returnToDeparture, desiredLocations, isAddingLocation]);
 
   // Dateオブジェクトを'YYYY-MM-DD'形式の文字列に変換
   function formatDate(date: Date): string {
@@ -185,6 +231,11 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
     };
     
     onSubmit(tripInfo);
+
+    // 送信が成功したら下書きをクリア
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
   };
   
   // 希望地候補を選択したら直接追加

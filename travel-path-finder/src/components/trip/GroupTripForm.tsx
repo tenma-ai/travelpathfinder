@@ -14,6 +14,7 @@ interface GroupTripFormProps {
  * 複数人旅行入力フォーム
  */
 const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: GroupTripFormProps) => {
+  const DRAFT_KEY = 'groupTripDraft';
   // メンバー情報
   const [members, setMembers] = useState<Member[]>(initialTripInfo?.members || []);
   const [newMemberName, setNewMemberName] = useState('');
@@ -70,6 +71,50 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
       setNewLocationSuggestions([]);
     }
   }, [newLocationName]);
+  
+  // -------------------- 下書きの読み込み --------------------
+  useEffect(() => {
+    if (initialTripInfo || isAddingLocation) return;
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const d = JSON.parse(saved);
+        setMembers(d.members || []);
+        setTripName(d.tripName || '');
+        setDepartureLocationName(d.departureLocationName || '');
+        setDepartureLocation(d.departureLocation || null);
+        setStartDate(d.startDate || '');
+        setEndDate(d.endDate || '');
+        setAutoEndDate(d.autoEndDate ?? false);
+        setReturnToDeparture(d.returnToDeparture ?? true);
+        setDesiredLocations(d.desiredLocations || []);
+      }
+    } catch (e) {
+      console.error('Failed to load group draft', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  
+  // -------------------- 下書きの保存 --------------------
+  useEffect(() => {
+    if (isAddingLocation) return;
+    const draft = {
+      members,
+      tripName,
+      departureLocationName,
+      departureLocation,
+      startDate,
+      endDate,
+      autoEndDate,
+      returnToDeparture,
+      desiredLocations
+    };
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) {
+      console.error('Failed to save group draft', e);
+    }
+  }, [members, tripName, departureLocationName, departureLocation, startDate, endDate, autoEndDate, returnToDeparture, desiredLocations, isAddingLocation]);
   
   /**
    * 新しいメンバーを追加
@@ -278,6 +323,10 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
     };
     
     onSubmit(tripInfo);
+
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
   };
   
   return (
