@@ -480,7 +480,7 @@ function calculateEfficiencyScore(itinerary: Itinerary): number {
       // 地点間の距離を計算
       const distance = calculateDistance(fromLoc.location.coordinates, toLoc.location.coordinates);
       totalDistance += distance;
-      totalDuration += route.duration;
+      totalDuration += route.duration || 0; // durationがundefinedの場合は0を使用
     }
   }
   

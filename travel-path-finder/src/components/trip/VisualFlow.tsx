@@ -105,7 +105,7 @@ const VisualFlow = ({ itinerary, members }: VisualFlowProps) => {
                       {itinerary.routes[index].transportType === 'air' ? '空路' : '陸路'}
                     </div>
                     <div className="text-gray-600">
-                      {formatDuration(itinerary.routes[index].estimatedDuration)}
+                      {formatDuration(itinerary.routes[index].estimatedDuration || itinerary.routes[index].duration || 0)}
                     </div>
                   </div>
                 </div>
