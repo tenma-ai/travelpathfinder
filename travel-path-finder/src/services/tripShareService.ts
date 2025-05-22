@@ -205,29 +205,30 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
         const data = await response.json();
         console.log('サーバーから旅行情報を取得しました', data);
         
+        // デバッグ情報ログ
+        console.log(`サーバーから取得したデータ構造: 
+          id=${data.id}, 
+          name=${data.name}, 
+          shareCode=${data.shareCode}, 
+          場所数=${data.desiredLocations?.length || 0}, 
+          generatedItinerary=${data.generatedItinerary ? '存在' : 'なし'}`
+        );
+        
         // 日付の復元
-        if (data.startDate) {
-          data.startDate = new Date(data.startDate);
-        }
-        if (data.endDate) {
-          data.endDate = new Date(data.endDate);
-        }
-        if (data.lastUpdated) {
-          data.lastUpdated = new Date(data.lastUpdated);
-        }
+        const tripData = restoreTripDates(data);
         
         // ローカルにも保存
         const sharedTrips = getSharedTrips();
         sharedTrips[shareCode] = {
           shareCode,
-          tripInfo: data,
+          tripInfo: tripData,
           createdAt: new Date(),
           lastUpdated: new Date(),
           version: 'v1-server'
         };
         saveSharedTrips(sharedTrips);
         
-        return data;
+        return tripData;
       }
       
       // 404の場合は続行
@@ -266,22 +267,16 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
       }
       
       // 日付の修正
-      if (tripInfo.startDate && !(tripInfo.startDate instanceof Date)) {
-        tripInfo.startDate = new Date(tripInfo.startDate);
-      }
-      
-      if (tripInfo.endDate && !(tripInfo.endDate instanceof Date)) {
-        tripInfo.endDate = new Date(tripInfo.endDate);
-      }
+      const tripData = restoreTripDates(tripInfo);
       
       // 新しい共有コードを生成
-      const newShareCode = generateShortCode(tripInfo.id + tripInfo.name + new Date().toISOString());
-      tripInfo.shareCode = newShareCode;
+      const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
+      tripData.shareCode = newShareCode;
       
       // 保存
       const sharedTripInfo: SharedTripInfo = {
         shareCode: newShareCode,
-        tripInfo,
+        tripInfo: tripData,
         createdAt: new Date(),
         lastUpdated: new Date()
       };
@@ -290,7 +285,7 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
       saveSharedTrips(sharedTrips);
       
       console.log(`圧縮データから復元された旅行情報を保存しました: ${newShareCode}`);
-      return tripInfo;
+      return tripData;
     } catch (e) {
       console.error('データ解凍失敗:', e);
     }
@@ -309,14 +304,17 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
       const parsed: TripInfo = JSON.parse(jsonStr, dateReviver);
       console.log('古い形式の共有データを正常に解析しました');
       
+      // 日付の復元
+      const tripData = restoreTripDates(parsed);
+      
       // 新しい形式に保存
-      const newShareCode = generateShortCode(parsed.id + parsed.name + new Date().toISOString());
-      parsed.shareCode = newShareCode;
+      const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
+      tripData.shareCode = newShareCode;
       
       // 保存
       const sharedTripInfo: SharedTripInfo = {
         shareCode: newShareCode,
-        tripInfo: parsed,
+        tripInfo: tripData,
         createdAt: new Date(),
         lastUpdated: new Date()
       };
@@ -326,7 +324,7 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
       
       console.log(`古い形式のデータを新形式(${newShareCode})に変換して保存しました`);
       
-      return parsed;
+      return tripData;
     } catch (e) {
       console.error('Base64デコード失敗:', e);
     }
@@ -338,6 +336,61 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
     throw new Error(`共有旅行情報の取得に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
   }
 };
+
+/**
+ * 日付文字列を含むTripInfoオブジェクトのすべての日付をDateオブジェクトに変換
+ */
+function restoreTripDates(data: any): TripInfo {
+  // 日付の復元（文字列からDateオブジェクトへ）
+  const result = { ...data };
+  
+  // 基本的な日付フィールド
+  if (result.startDate && typeof result.startDate === 'string') {
+    result.startDate = new Date(result.startDate);
+  }
+  
+  if (result.endDate && typeof result.endDate === 'string') {
+    result.endDate = new Date(result.endDate);
+  }
+  
+  if (result.lastUpdated && typeof result.lastUpdated === 'string') {
+    result.lastUpdated = new Date(result.lastUpdated);
+  }
+  
+  // generatedItineraryが存在する場合、そのlocation内の日付も復元
+  if (result.generatedItinerary && result.generatedItinerary.locations) {
+    result.generatedItinerary.locations = result.generatedItinerary.locations.map((loc: any) => {
+      const newLoc = { ...loc };
+      
+      if (newLoc.arrivalDate && typeof newLoc.arrivalDate === 'string') {
+        newLoc.arrivalDate = new Date(newLoc.arrivalDate);
+      }
+      
+      if (newLoc.departureDate && typeof newLoc.departureDate === 'string') {
+        newLoc.departureDate = new Date(newLoc.departureDate);
+      }
+      
+      return newLoc;
+    });
+  }
+  
+  // desiredLocationsの日付も復元
+  if (result.desiredLocations) {
+    result.desiredLocations = result.desiredLocations.map((loc: any) => {
+      const newLoc = { ...loc };
+      
+      if (newLoc.specificDates && Array.isArray(newLoc.specificDates)) {
+        newLoc.specificDates = newLoc.specificDates.map((date: any) => 
+          typeof date === 'string' ? new Date(date) : date
+        );
+      }
+      
+      return newLoc;
+    });
+  }
+  
+  return result as TripInfo;
+}
 
 /**
  * 旅行に参加

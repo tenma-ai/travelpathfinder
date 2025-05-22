@@ -45,18 +45,61 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     
     // 最終更新日時を設定
     const lastUpdated = new Date().toISOString();
-    const tripWithMeta = {
+    
+    // 日付データを文字列に変換して確実にJSONシリアライズされるようにする
+    const processedTripInfo = {
       ...tripInfo,
+      startDate: tripInfo.startDate ? tripInfo.startDate.toISOString() : null,
+      endDate: tripInfo.endDate ? tripInfo.endDate.toISOString() : null,
       shareCode,
       lastUpdated,
       version: "v1"
     };
+    
+    // 念のため、generatedItineraryが存在する場合に中の日付も全てシリアライズ
+    if (processedTripInfo.generatedItinerary) {
+      // 日付情報を文字列に変換（タイプエラーを避けるため直接クローン作成）
+      const serializedLocations = processedTripInfo.generatedItinerary.locations.map(loc => {
+        return {
+          ...loc,
+          arrivalDate: loc.arrivalDate instanceof Date 
+            ? loc.arrivalDate.toISOString() 
+            : typeof loc.arrivalDate === 'string'
+              ? loc.arrivalDate
+              : new Date(loc.arrivalDate).toISOString(),
+          departureDate: loc.departureDate instanceof Date 
+            ? loc.departureDate.toISOString() 
+            : typeof loc.departureDate === 'string'
+              ? loc.departureDate
+              : new Date(loc.departureDate).toISOString()
+        };
+      });
+      
+      // 型を気にせず直接JSONシリアライズするためのオブジェクト
+      const serializedItinerary = {
+        ...processedTripInfo.generatedItinerary,
+        locations: serializedLocations
+      };
+      
+      // 型安全性はJSONシリアライズで失われるため代入
+      processedTripInfo.generatedItinerary = serializedItinerary as any;
+    }
 
     // Blobsストアを使用してデータを保存
     const store = getStore("trip-shares");
     
-    // データを保存（ttlはBlobsでは現在サポートされていない可能性があるため、基本的な保存のみ実行）
-    await store.set(shareCode, JSON.stringify(tripWithMeta));
+    // JSON文字列化して保存
+    const jsonData = JSON.stringify(processedTripInfo);
+    console.log(`共有コード「${shareCode}」で旅行データを保存します。データサイズ: ${jsonData.length}バイト`);
+    await store.set(shareCode, jsonData);
+    
+    // 保存後に検証
+    const verification = await store.get(shareCode);
+    if (!verification) {
+      console.error(`データ保存の検証に失敗しました: ${shareCode}`);
+    } else {
+      console.log(`保存データの検証完了: ${shareCode} (サイズ: ${verification.length}バイト)`);
+    }
     
     console.log(`旅行共有データを保存しました: ${shareCode}`);
 

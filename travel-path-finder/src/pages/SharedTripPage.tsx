@@ -15,6 +15,7 @@ const SharedTripPage = () => {
   const navigate = useNavigate();
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [routeLoading, setRouteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
@@ -53,6 +54,21 @@ const SharedTripPage = () => {
           tripData.endDate = new Date(tripData.endDate);
         }
         
+        // 最適ルートが存在しない場合は生成する
+        if (!tripData.generatedItinerary) {
+          try {
+            setRouteLoading(true);
+            console.log('ルートが存在しないため、新しくルートを生成します');
+            const optimizedRoute = await generateOptimalRoute(tripData);
+            tripData.generatedItinerary = optimizedRoute;
+          } catch (routeError) {
+            console.error('ルート生成中にエラーが発生しました:', routeError);
+            // ルート生成に失敗してもTripInfoは表示できるようにする
+          } finally {
+            setRouteLoading(false);
+          }
+        }
+        
         // デバッグ情報の更新
         setDebugInfo(prev => ({
           ...prev,
@@ -60,6 +76,7 @@ const SharedTripPage = () => {
           tripName: tripData.name,
           tripId: tripData.id,
           locationsCount: tripData.desiredLocations?.length || 0,
+          hasRoute: !!tripData.generatedItinerary,
           endTime: new Date().toISOString()
         }));
         
@@ -101,6 +118,7 @@ const SharedTripPage = () => {
    */
   const handleAddLocation = async (updatedTripInfo: TripInfo) => {
     try {
+      setRouteLoading(true);
       // 最適ルートを再計算（非同期）
       const optimizedRoute = await generateOptimalRoute(updatedTripInfo);
       
@@ -115,6 +133,8 @@ const SharedTripPage = () => {
     } catch (error) {
       console.error('ルート生成中にエラーが発生しました:', error);
       setError(`ルート生成中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    } finally {
+      setRouteLoading(false);
     }
   };
 
@@ -124,6 +144,18 @@ const SharedTripPage = () => {
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-black mb-4"></div>
           <h2 className="text-xl mb-4">共有された旅行情報を読み込み中...</h2>
+          <p className="text-gray-600">少々お待ちください</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (routeLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-black mb-4"></div>
+          <h2 className="text-xl mb-4">最適な旅行ルートを計算中...</h2>
           <p className="text-gray-600">少々お待ちください</p>
         </div>
       </div>
