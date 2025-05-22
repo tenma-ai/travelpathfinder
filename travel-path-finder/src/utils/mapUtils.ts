@@ -29,36 +29,32 @@ function toRad(degrees: number): number {
 
 /**
  * 2地点間の移動に最適な交通手段を決定
+ * 海路は除外し、陸路と空路のみを扱う
  */
-export function determineTransportType(from: Location, to: Location): 'air' | 'land' | 'sea' {
+export function determineTransportType(from: Location, to: Location): 'air' | 'land' {
   const distance = calculateDistance(from.coordinates, to.coordinates);
   
-  // 簡易判定ロジック
+  // 700km以上の距離は強制的に空路に
   if (distance >= 700) {
     return 'air';
   }
   
-  // 海を挟む場合の判定はより複雑な処理が必要
-  // 実際には地理的特性を考慮する必要がある
-  
+  // それ以外は陸路
   return 'land';
 }
 
 /**
  * 推定移動時間を計算（時間単位）
  */
-export function estimateTransportDuration(from: Location, to: Location, transportType: 'air' | 'land' | 'sea'): number {
+export function estimateTransportDuration(from: Location, to: Location, transportType: 'air' | 'land'): number {
   const distance = calculateDistance(from.coordinates, to.coordinates);
   
   if (transportType === 'air') {
     // 飛行機: 平均速度800km/hと空港での3時間
     return distance / 800 + 3;
-  } else if (transportType === 'land') {
-    // 陸路: 平均速度20km/h（従来の80km/hから変更）
-    return distance / 20;
   } else {
-    // 海路: 平均速度30km/h
-    return distance / 30;
+    // 陸路: 平均速度20km/h
+    return distance / 20;
   }
 }
 
