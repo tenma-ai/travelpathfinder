@@ -356,9 +356,9 @@ const SharedTripPage = () => {
               <ul className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {tripInfo.desiredLocations.map(location => (
                   <li key={location.id} className="border border-gray-200 rounded p-3">
-                    <div className="font-medium">{location.name}</div>
+                    <div className="font-medium">{location.location.name}</div>
                     <div className="text-sm text-gray-600">
-                      {location.memberIds.map(memberId => {
+                      {location.requesters.map((memberId: string) => {
                         const member = tripInfo.members.find(m => m.id === memberId);
                         return member ? (
                           <span 
