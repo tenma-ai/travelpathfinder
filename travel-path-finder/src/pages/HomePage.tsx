@@ -63,42 +63,49 @@ const HomePage = () => {
         <h1 className="text-4xl font-bold mb-2 text-black">TravelPathFinder</h1>
         <p className="text-lg text-black">あなたの理想的な旅行ルートを最適化</p>
       </div>
-      
-      <div className="flex flex-col space-y-4 w-full max-w-md">
-        <button 
+
+      <div className="flex flex-col md:flex-row gap-8">
+        <button
           onClick={handleSoloTripSelect}
-          className="flex items-center justify-between px-6 py-4 bg-white border-2 border-black rounded-lg shadow-md hover:bg-gray-50 transition-colors text-left"
+          className="trip-selection-card flex flex-col items-center p-8 bg-white border-2 border-black rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 max-w-xs w-full"
         >
-          <div>
-            <h2 className="text-xl font-bold mb-1 text-black">一人旅</h2>
-            <p className="text-sm text-gray-700">あなただけの旅行計画を最適化</p>
+          <div className="icon-container mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
           </div>
-          <span className="text-2xl">→</span>
+          <h2 className="text-2xl font-bold mb-2 text-black">一人旅</h2>
+          <p className="text-center text-black">個人の希望に合わせた最適な旅程を作成します。</p>
         </button>
-        
-        <button 
+
+        <button
           onClick={handleGroupTripSelect}
-          className="flex items-center justify-between px-6 py-4 bg-white border-2 border-black rounded-lg shadow-md hover:bg-gray-50 transition-colors text-left"
+          className="trip-selection-card flex flex-col items-center p-8 bg-white border-2 border-black rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 max-w-xs w-full"
         >
-          <div>
-            <h2 className="text-xl font-bold mb-1 text-black">複数人旅行</h2>
-            <p className="text-sm text-gray-700">友人や家族との旅行計画を最適化</p>
+          <div className="icon-container mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
           </div>
-          <span className="text-2xl">→</span>
+          <h2 className="text-2xl font-bold mb-2 text-black">複数人旅行</h2>
+          <p className="text-center text-black">グループ全員の希望を平等に考慮した最適な旅程を提案します。</p>
         </button>
-        
-        <button 
+
+        <button
           onClick={handleJoinSelect}
-          className="flex items-center justify-between px-6 py-4 bg-white border-2 border-black rounded-lg shadow-md hover:bg-gray-50 transition-colors text-left"
+          className="trip-selection-card flex flex-col items-center p-8 bg-white border-2 border-black rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 max-w-xs w-full"
         >
-          <div>
-            <h2 className="text-xl font-bold mb-1 text-black">旅行に参加</h2>
-            <p className="text-sm text-gray-700">共有された旅行計画に参加</p>
+          <div className="icon-container mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+            </svg>
           </div>
-          <span className="text-2xl">→</span>
+          <h2 className="text-2xl font-bold mb-2 text-black">旅行に参加</h2>
+          <p className="text-center text-black">共有コードを使って他の人の旅行計画に参加します。</p>
         </button>
       </div>
-      
+
+      {/* 参加モーダル */}
       {showJoinModal && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
@@ -109,15 +116,15 @@ const HomePage = () => {
               type="text"
               value={shareCode}
               onChange={handleShareCodeChange}
-              placeholder="共有コードを入力"
-              className={`w-full border ${codeError ? 'border-red-500' : 'border-black'} rounded p-2 mb-2 text-black bg-white`}
+              placeholder="共有コード（例: ABC123）"
+              className={`w-full border ${codeError ? 'border-red-500' : 'border-black'} rounded p-2 mb-4 text-black bg-white`}
             />
             
             {codeError && (
               <p className="text-red-500 text-sm mb-4">{codeError}</p>
             )}
             
-            <div className="flex justify-end space-x-3 mt-4">
+            <div className="flex justify-end space-x-3">
               <button
                 onClick={() => {
                   setShowJoinModal(false);
