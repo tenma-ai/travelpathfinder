@@ -35,10 +35,8 @@ export function determineTransportType(from: Location, to: Location): 'air' | 'l
 
   const isAirport = (loc: Location) => /空港|Airport|International Airport/i.test(loc.name);
 
-  // 飛行機を利用する条件:
-  // ・長距離(>=700km)
-  // ・出発地または到着地のいずれもが空港名、または両地点が500km 以上離れた別国
-  if (distance >= 700 && (isAirport(from) || isAirport(to))) {
+  // 長距離(>=700km) は空路を選択。実際に空港が無い場合はルート作成側で最寄り空港を挿入します。
+  if (distance >= 700) {
     return 'air';
   }
 
@@ -83,4 +81,34 @@ export function generateMemberColors(memberCount: number): string[] {
   }
   
   return colors.slice(0, memberCount);
-} 
+}
+
+// ---------------- Airport Utilities ----------------
+export const airports: Location[] = [
+  { name: 'Tokyo Haneda Airport', country: 'Japan', region: 'Tokyo', coordinates: [139.784, 35.549] },
+  { name: 'Narita International Airport', country: 'Japan', region: 'Chiba', coordinates: [140.392, 35.773] },
+  { name: 'Kansai International Airport', country: 'Japan', region: 'Osaka', coordinates: [135.244, 34.436] },
+  { name: 'New Chitose Airport', country: 'Japan', region: 'Hokkaido', coordinates: [141.681, 42.775] },
+  { name: 'Fukuoka Airport', country: 'Japan', region: 'Fukuoka', coordinates: [130.451, 33.585] },
+  { name: 'Los Angeles International Airport', country: 'USA', region: 'California', coordinates: [-118.408, 33.942] },
+  { name: 'John F. Kennedy International Airport', country: 'USA', region: 'New York', coordinates: [-73.778, 40.641] },
+  { name: 'London Heathrow Airport', country: 'UK', region: 'London', coordinates: [-0.454, 51.470] }
+];
+
+export const isAirport = (loc: Location): boolean => /空港|Airport/i.test(loc.name);
+
+// 距離閾値( km ) 以内に空港が無ければ null
+export function findNearestAirport(location: Location, maxDistanceKm = 300): Location | null {
+  let nearest: Location | null = null;
+  let minDist = Infinity;
+  for (const ap of airports) {
+    const d = calculateDistance(location.coordinates, ap.coordinates);
+    if (d < minDist) {
+      minDist = d;
+      nearest = ap;
+    }
+  }
+  if (minDist <= maxDistanceKm) return nearest;
+  return null;
+}
+// --------------------------------------------------- 
