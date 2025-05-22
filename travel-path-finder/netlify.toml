@@ -7,3 +7,9 @@
   targetPort = 5173
 
 # Redirects are handled via public/_redirects 
+
+# SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200 
