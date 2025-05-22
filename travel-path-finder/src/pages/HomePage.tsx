@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTripInfoByShareCodeAsync } from '../services/tripShareService';
 
 /**
  * 初期選択画面（一人旅/複数人旅行/旅行に参加の選択）
@@ -10,7 +9,6 @@ const HomePage = () => {
   const [shareCode, setShareCode] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
 
   const handleSoloTripSelect = () => {
     navigate('/solo-trip');
@@ -42,7 +40,7 @@ const HomePage = () => {
     }
   };
 
-  const handleJoinTrip = async () => {
+  const handleJoinTrip = () => {
     const trimmedCode = shareCode.trim();
     
     if (!trimmedCode) {
@@ -55,26 +53,8 @@ const HomePage = () => {
       return;
     }
     
-    // ローディング状態をセット
-    setIsLoading(true);
-    
-    try {
-      // 非同期版のコード取得を使用（クラウドストレージ対応）
-      const tripInfo = await getTripInfoByShareCodeAsync(trimmedCode);
-      
-      if (!tripInfo) {
-        setCodeError('指定された共有コードの旅行情報が見つかりませんでした。正しい共有コードであることを確認してください。');
-        setIsLoading(false);
-        return;
-      }
-      
-      // 問題なければ遷移
-      navigate(`/join-trip/${encodeURIComponent(trimmedCode)}`);
-    } catch (error) {
-      console.error('共有コード検証エラー:', error);
-      setCodeError(`エラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
-      setIsLoading(false);
-    }
+    // 問題なければ遷移
+    navigate(`/join-trip/${encodeURIComponent(trimmedCode)}`);
   };
 
   return (
@@ -138,7 +118,6 @@ const HomePage = () => {
               onChange={handleShareCodeChange}
               placeholder="共有コード（例: ABC123）"
               className={`w-full border ${codeError ? 'border-red-500' : 'border-black'} rounded p-2 mb-4 text-black bg-white`}
-              disabled={isLoading}
             />
             
             {codeError && (
@@ -152,26 +131,15 @@ const HomePage = () => {
                   setCodeError(null);
                 }}
                 className="px-4 py-2 border border-black rounded"
-                disabled={isLoading}
               >
                 キャンセル
               </button>
               <button
                 onClick={handleJoinTrip}
-                className="px-4 py-2 bg-black text-white rounded flex items-center justify-center"
-                disabled={!shareCode.trim() || !!codeError || isLoading}
+                className="px-4 py-2 bg-black text-white rounded"
+                disabled={!shareCode.trim() || !!codeError}
               >
-                {isLoading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    確認中...
-                  </>
-                ) : (
-                  '参加'
-                )}
+                参加
               </button>
             </div>
           </div>

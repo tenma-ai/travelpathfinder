@@ -4,8 +4,9 @@ import { compressToURI, decompressFromURI } from '../utils/compression';
 
 // ローカルストレージのキー
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
-// クラウドストレージ統合用の識別子
-const CLOUD_STORAGE_PREFIX = 'CLOUD:';
+
+// APIエンドポイント
+const API_BASE_URL = '/api';
 
 // --- Base64エンコード/デコードユーティリティ ---
 const base64EncodeUnicode = (str: string): string => {
@@ -50,116 +51,69 @@ const generateShortCode = (input: string): string => {
 };
 
 /**
- * 一時クラウドストレージを使用したデータ保存（デモ用）
- * 注意: 本番環境では適切なバックエンド実装に置き換えてください
+ * 旅行情報を共有する（サーバーレスAPI版）
+ * @param tripInfo 共有する旅行情報
+ * @returns {Promise<string>} 共有コード
  */
-const tempCloudStore = {
-  // クラウドストレージURLが有効かどうかを判定
-  isCloudUrl: (code: string): boolean => {
-    return code.startsWith(CLOUD_STORAGE_PREFIX);
-  },
-  
-  // クラウドストレージからURLを抽出
-  extractUrl: (code: string): string => {
-    return code.replace(CLOUD_STORAGE_PREFIX, '');
-  },
-  
-  // JSON Bin APIを使用した一時的なクラウドストレージ
-  saveDataToCloud: async (data: any): Promise<string> => {
-    try {
-      const compressed = compressToURI(data);
-      const binId = await createJsonBin(compressed);
-      return `${CLOUD_STORAGE_PREFIX}${binId}`;
-    } catch (e) {
-      console.error('クラウドストレージ保存エラー:', e);
-      throw e;
+export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
+  try {
+    console.log('サーバーレス共有処理開始', { tripName: tripInfo.name });
+    
+    // クローンして余分なデータを削除
+    const tripToShare = JSON.parse(JSON.stringify(tripInfo));
+    
+    // APIリクエスト
+    const response = await fetch(`${API_BASE_URL}/createShare`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tripToShare),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error('サーバー共有エラー:', response.status, errorData);
+      throw new Error(`サーバー共有に失敗しました (${response.status}): ${errorData}`);
     }
-  },
-  
-  // クラウドストレージからデータを取得
-  getDataFromCloud: async (cloudCode: string): Promise<any> => {
-    try {
-      if (!tempCloudStore.isCloudUrl(cloudCode)) {
-        throw new Error('有効なクラウドストレージコードではありません');
-      }
-      
-      const binId = tempCloudStore.extractUrl(cloudCode);
-      const compressed = await getJsonBin(binId);
-      
-      if (!compressed) {
-        throw new Error('クラウドストレージからデータを取得できませんでした');
-      }
-      
-      return decompressFromURI(compressed);
-    } catch (e) {
-      console.error('クラウドストレージ取得エラー:', e);
-      throw e;
-    }
+    
+    const data = await response.json();
+    console.log('サーバー共有成功:', data);
+    
+    // クライアント側にも情報を保存（フォールバック用）
+    const sharedTrips = getSharedTrips();
+    
+    // 共有情報を作成
+    const sharedTripInfo: SharedTripInfo = {
+      shareCode: data.shareCode,
+      tripInfo: {
+        ...tripInfo,
+        shareCode: data.shareCode,
+        lastUpdated: new Date(),
+        isServerShared: true
+      },
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      version: 'v1-server',
+    };
+    
+    // 共有情報をローカルにも保存
+    sharedTrips[data.shareCode] = sharedTripInfo;
+    saveSharedTrips(sharedTrips);
+    
+    return data.shareCode;
+  } catch (error) {
+    console.error('サーバーレス共有処理中にエラーが発生しました:', error);
+    // サーバー共有に失敗した場合、ローカル共有にフォールバック
+    console.log('ローカル共有にフォールバックします...');
+    return shareTripInfo(tripInfo);
   }
 };
 
 /**
- * JSONBin.ioに圧縮データを保存する
- * 注意: これは一時的なデモ実装です。本番環境では適切なバックエンドが必要です。
- */
-async function createJsonBin(compressedData: string): Promise<string> {
-  // 匿名の一時ストレージとして使用できるサービス（例：JSONBin.io）
-  const endpoint = 'https://api.jsonbin.io/v3/b';
-  
-  try {
-    // 注: 実際の実装では適切なAPI認証が必要です
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': '$2a$10$RaUa9mlAmZvPzKKK3nqI2.l0oJ0Bt2tEjfRdKpjPG08sIyTYmX14i', // デモ用キー
-        'X-Bin-Private': 'false'
-      },
-      body: JSON.stringify({ data: compressedData })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`クラウドストレージへの保存に失敗しました: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    return result.metadata.id;
-  } catch (e) {
-    console.error('JSONBin保存エラー:', e);
-    throw new Error('一時ストレージへの保存に失敗しました。インターネット接続を確認してください。');
-  }
-}
-
-/**
- * JSONBin.ioから圧縮データを取得する
- */
-async function getJsonBin(binId: string): Promise<string | null> {
-  const endpoint = `https://api.jsonbin.io/v3/b/${binId}`;
-  
-  try {
-    const response = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        'X-Master-Key': '$2a$10$RaUa9mlAmZvPzKKK3nqI2.l0oJ0Bt2tEjfRdKpjPG08sIyTYmX14i' // デモ用キー
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`クラウドストレージからの取得に失敗しました: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    return result.record.data;
-  } catch (e) {
-    console.error('JSONBin取得エラー:', e);
-    return null;
-  }
-}
-
-/**
- * 旅行情報を共有する（クラウドストレージ対応版）
+ * 旅行情報を共有する（ローカルストレージ版 - 従来方式）
  * @param tripInfo 共有する旅行情報
- * @returns 共有コード（同期版）
+ * @returns 共有コード
  */
 export const shareTripInfo = (tripInfo: TripInfo): string => {
   try {
@@ -200,60 +154,6 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
 };
 
 /**
- * 旅行情報を共有する（クラウドストレージ版、非同期）
- * @param tripInfo 共有する旅行情報
- * @returns Promise<共有コード>
- */
-export const shareTripInfoToCloud = async (tripInfo: TripInfo): Promise<string> => {
-  try {
-    console.log('クラウド共有処理開始', { tripName: tripInfo.name });
-    
-    // 最終更新日時を設定
-    const lastUpdated = new Date();
-    
-    // 共有用に最小限の情報を含むオブジェクトを作成
-    const minimalInfo = {
-      ...tripInfo,
-      lastUpdated
-    };
-    
-    // クラウドストレージに保存
-    const cloudCode = await tempCloudStore.saveDataToCloud(minimalInfo);
-    console.log(`クラウド共有コード生成成功: ${cloudCode}`);
-    
-    // ローカルストレージにも保存（キャッシュとして）
-    try {
-      const sharedTrips = getSharedTrips();
-      const shareCode = cloudCode.replace(CLOUD_STORAGE_PREFIX, 'LOCAL_');
-      
-      // 共有情報を作成
-      const sharedTripInfo: SharedTripInfo = {
-        shareCode,
-        tripInfo: {
-          ...tripInfo,
-          shareCode,
-          lastUpdated
-        },
-        createdAt: new Date(),
-        lastUpdated
-      };
-      
-      // 共有情報を保存
-      sharedTrips[shareCode] = sharedTripInfo;
-      saveSharedTrips(sharedTrips);
-    } catch (localError) {
-      // ローカル保存に失敗してもクラウドコードは返す
-      console.warn('ローカルキャッシュの保存に失敗:', localError);
-    }
-    
-    return cloudCode;
-  } catch (error) {
-    console.error('クラウド共有処理中にエラーが発生しました:', error);
-    throw new Error(`クラウド共有処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
-  }
-};
-
-/**
  * 旅行情報を共有データとしてエクスポート（直接URLに含めるデータ）
  * 新方式: 圧縮ユーティリティを使用
  * @param tripInfo 共有する旅行情報
@@ -288,25 +188,61 @@ export const exportTripData = (tripInfo: TripInfo): string => {
 };
 
 /**
- * 共有コードを使用して旅行情報を取得（クラウドストレージ対応）
+ * 共有コードを使用して旅行情報を取得
  * @param shareCode 共有コード
  * @returns 旅行情報（存在しない場合はnull）
  */
-export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
+export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInfo | null> => {
   try {
     console.log(`共有コード検索開始: ${shareCode}`);
     
-    // クラウドストレージのコードの場合は非同期処理が必要なため、エラーを返す
-    if (tempCloudStore.isCloudUrl(shareCode)) {
-      console.error('クラウドコードは非同期版のgetTripInfoByShareCodeAsyncを使用してください:', shareCode);
-      return null;
+    // 1. サーバーAPIから取得を試みる（新方式）
+    try {
+      console.log(`サーバーAPIから取得を試みています: ${shareCode}`);
+      const response = await fetch(`${API_BASE_URL}/getShare/${shareCode}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('サーバーから旅行情報を取得しました', data);
+        
+        // 日付の復元
+        if (data.startDate) {
+          data.startDate = new Date(data.startDate);
+        }
+        if (data.endDate) {
+          data.endDate = new Date(data.endDate);
+        }
+        if (data.lastUpdated) {
+          data.lastUpdated = new Date(data.lastUpdated);
+        }
+        
+        // ローカルにも保存
+        const sharedTrips = getSharedTrips();
+        sharedTrips[shareCode] = {
+          shareCode,
+          tripInfo: data,
+          createdAt: new Date(),
+          lastUpdated: new Date(),
+          version: 'v1-server'
+        };
+        saveSharedTrips(sharedTrips);
+        
+        return data;
+      }
+      
+      // 404の場合は続行
+      if (response.status !== 404) {
+        console.error(`サーバーからの取得に失敗: ${response.status}`);
+      }
+    } catch (e) {
+      console.error('サーバーからの取得中にエラー:', e);
     }
     
+    // 2. ローカルストレージから検索（旧方式）
     const sharedTrips = getSharedTrips();
     
-    // 1. まず通常の共有コードとして検索
     if (sharedTrips[shareCode]) {
-      console.log(`共有コード発見: ${shareCode}`);
+      console.log(`ローカルストレージで共有コード発見: ${shareCode}`);
       
       // 日付のリハイドレーション
       const tripInfo = JSON.parse(JSON.stringify(sharedTrips[shareCode].tripInfo), dateReviver);
@@ -315,9 +251,9 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
       return tripInfo;
     }
     
-    console.log(`通常の共有コードでは見つかりませんでした。データ解凍を試行: ${shareCode.substring(0, 20)}...`);
+    console.log(`ローカルストレージでも見つかりませんでした。データ解凍を試行: ${shareCode.substring(0, 20)}...`);
     
-    // 2. データ復元を試行（新しい圧縮形式）
+    // 3. データ復元を試行（新しい圧縮形式）
     try {
       // 圧縮データを解凍
       const tripInfo = decompressFromURI(shareCode);
@@ -359,7 +295,7 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
       console.error('データ解凍失敗:', e);
     }
     
-    // 3. 古い形式のBase64エンコードされたデータとして試行
+    // 4. 古い形式のBase64エンコードされたデータとして試行
     try {
       // URLデコード
       const decodedShareCode = decodeURIComponent(shareCode);
@@ -400,75 +336,6 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
   } catch (error) {
     console.error('共有旅行情報の取得中にエラーが発生しました:', error);
     throw new Error(`共有旅行情報の取得に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
-  }
-};
-
-/**
- * 共有コードを使用して旅行情報を取得（非同期版、クラウドストレージ対応）
- * @param shareCode 共有コード
- * @returns Promise<旅行情報>（存在しない場合はnull）
- */
-export const getTripInfoByShareCodeAsync = async (shareCode: string): Promise<TripInfo | null> => {
-  try {
-    console.log(`非同期: 共有コード検索開始: ${shareCode}`);
-    
-    // 1. クラウドストレージのコードの場合は専用の処理を実行
-    if (tempCloudStore.isCloudUrl(shareCode)) {
-      console.log(`クラウドストレージコードを検出: ${shareCode}`);
-      try {
-        const tripInfo = await tempCloudStore.getDataFromCloud(shareCode);
-        
-        // データ検証と修正
-        if (!tripInfo || !tripInfo.id || !tripInfo.name) {
-          console.error('クラウドから取得したデータが不完全です');
-          return null;
-        }
-        
-        // 日付の修正
-        if (tripInfo.startDate && !(tripInfo.startDate instanceof Date)) {
-          tripInfo.startDate = new Date(tripInfo.startDate);
-        }
-        
-        if (tripInfo.endDate && !(tripInfo.endDate instanceof Date)) {
-          tripInfo.endDate = new Date(tripInfo.endDate);
-        }
-        
-        console.log('クラウドから旅行情報を正常に取得しました', tripInfo);
-        
-        // ローカルキャッシュに保存
-        try {
-          const sharedTrips = getSharedTrips();
-          const localShareCode = shareCode.replace(CLOUD_STORAGE_PREFIX, 'LOCAL_');
-          
-          const sharedTripInfo: SharedTripInfo = {
-            shareCode: localShareCode,
-            tripInfo: {
-              ...tripInfo,
-              shareCode: localShareCode
-            },
-            createdAt: new Date(),
-            lastUpdated: new Date()
-          };
-          
-          sharedTrips[localShareCode] = sharedTripInfo;
-          saveSharedTrips(sharedTrips);
-          console.log('クラウドデータをローカルキャッシュに保存しました');
-        } catch (cacheError) {
-          console.warn('ローカルキャッシュへの保存に失敗:', cacheError);
-        }
-        
-        return tripInfo;
-      } catch (cloudError) {
-        console.error('クラウドストレージからのデータ取得に失敗:', cloudError);
-        throw new Error(`クラウドストレージからのデータ取得に失敗しました: ${cloudError instanceof Error ? cloudError.message : '不明なエラー'}`);
-      }
-    }
-    
-    // 2. 通常の同期処理でデータを取得
-    return getTripInfoByShareCode(shareCode);
-  } catch (error) {
-    console.error('非同期共有旅行情報の取得中にエラーが発生しました:', error);
-    throw new Error(`非同期共有旅行情報の取得に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
   }
 };
 

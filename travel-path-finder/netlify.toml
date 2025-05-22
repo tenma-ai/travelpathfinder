@@ -1,6 +1,7 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
 
 [dev]
   command = "npm run dev"
@@ -38,5 +39,12 @@
 [[redirects]]
   from = "/join-trip/*"
   to = "/index.html"
+  status = 200
+  force = true
+
+# API用のリダイレクト
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
   status = 200
   force = true 

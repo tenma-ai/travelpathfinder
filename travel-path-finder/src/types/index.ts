@@ -40,15 +40,18 @@ export interface ItineraryLocation {
   arrivalDate: Date;
   departureDate: Date;
   originalRequesters: string[]; // この場所を希望したメンバーID
+  priority?: number; // 優先度
 }
 
 // 移動経路
 export interface Route {
   id: string;
-  from: string; // ItineraryLocation ID
-  to: string; // ItineraryLocation ID
-  transportType: 'air' | 'land';
-  estimatedDuration: number; // 時間単位
+  from: string; // 出発地点ID
+  to: string; // 目的地点ID
+  transportType: 'land' | 'air';
+  estimatedDuration?: number; // 推定所要時間（時間）
+  distance?: number; // 距離（km）
+  duration?: number; // 移動時間（時間）
 }
 
 // 旅行情報
@@ -65,14 +68,16 @@ export interface TripInfo {
   tripType: 'solo' | 'group' | 'join';
   shareCode?: string; // 共有コード - 共有時に自動生成
   lastUpdated?: Date; // 最終更新日時
+  isServerShared?: boolean; // サーバーに保存されているかどうか
 }
 
-// 共有可能な旅行情報（サーバー保存用）
+// 共有旅行情報
 export interface SharedTripInfo {
   shareCode: string;
   tripInfo: TripInfo;
   createdAt: Date;
   lastUpdated: Date;
+  version?: string; // バージョン情報（サーバー連携など）
 }
 
 // 参加者情報

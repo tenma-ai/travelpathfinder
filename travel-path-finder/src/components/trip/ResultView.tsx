@@ -3,7 +3,7 @@ import type { Itinerary, TripInfo } from '../../types';
 import MapView from './MapView';
 import VisualFlow from './VisualFlow';
 import CalendarView from './CalendarView';
-import { shareTripInfo, exportTripData } from '../../services/tripShareService';
+import { shareTripInfo, exportTripData, shareToServer } from '../../services/tripShareService';
 
 interface ResultViewProps {
   tripInfo: TripInfo;
@@ -23,6 +23,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareMethod, setShareMethod] = useState<'code' | 'url' | 'direct'>('code');
+  const [isSharing, setIsSharing] = useState(false);
   
   if (!generatedItinerary) {
     return (
@@ -41,22 +42,39 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
   /**
    * 共有コードを生成する
    */
-  const handleShare = () => {
+  const handleShare = async () => {
     try {
+      setIsSharing(true);
       console.log('ResultView: 共有処理開始', { tripName: tripInfo.name });
       
-      // 共有コード方式
-      const code = shareTripInfo(tripInfo);
-      setShareCode(code);
+      // 1. 優先: サーバーレスAPIを使用した共有（より信頼性が高い）
+      try {
+        const code = await shareToServer(tripInfo);
+        setShareCode(code);
+        
+        // 共有用URLを生成（コード方式）
+        const baseUrl = window.location.origin;
+        const shareUrl = `${baseUrl}/shared/${code}`;
+        setShareUrl(shareUrl);
+        console.log('サーバーレス共有成功:', { code, shareUrl });
+      } catch (serverError) {
+        console.error('サーバーレス共有失敗:', serverError);
+        
+        // 2. フォールバック: 従来の共有コード方式（ローカルストレージ）
+        const code = shareTripInfo(tripInfo);
+        setShareCode(code);
+        
+        // 共有用URLを生成（コード方式）
+        const baseUrl = window.location.origin;
+        const shareUrl = `${baseUrl}/shared/${code}`;
+        setShareUrl(shareUrl);
+        console.log('ローカル共有にフォールバック:', { code, shareUrl });
+      }
       
-      // 共有用URLを生成（コード方式）
-      const baseUrl = window.location.origin;
-      const shareUrl = `${baseUrl}/shared/${code}`;
-      setShareUrl(shareUrl);
-      
-      // 直接データを含めた短いURL方式（圧縮データを使用）
+      // 3. 補助: 直接データを含めた短いURL方式（圧縮データを使用）
       try {
         const compressedData = exportTripData(tripInfo);
+        const baseUrl = window.location.origin;
         const directUrl = `${baseUrl}/shared/${encodeURIComponent(compressedData)}`;
         setCompressedUrl(directUrl);
         console.log('圧縮データURL生成成功:', directUrl.substring(0, 50) + '...');
@@ -66,12 +84,14 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
       }
       
       setShareError(null);
-      console.log('ResultView: 共有処理完了', { code, shareUrl });
+      console.log('ResultView: 共有処理完了');
       setIsShareModalOpen(true);
     } catch (error) {
       console.error('ResultView: 共有処理エラー', error);
       setShareError(`共有の処理中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
       setIsShareModalOpen(true);
+    } finally {
+      setIsSharing(false);
     }
   };
   
@@ -169,10 +189,21 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
         
         <div className="flex space-x-2">
           <button 
-            className="px-4 py-2 bg-black text-white rounded"
+            className="px-4 py-2 bg-black text-white rounded flex items-center"
             onClick={handleShare}
+            disabled={isSharing}
           >
-            共有する
+            {isSharing ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                共有中...
+              </>
+            ) : (
+              '共有する'
+            )}
           </button>
           
           {onAddLocation && (

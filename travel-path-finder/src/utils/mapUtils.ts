@@ -30,8 +30,30 @@ function toRad(degrees: number): number {
 /**
  * 2地点間の移動に最適な交通手段を決定
  * 陸路と空路のみを扱う
+ * @param from 出発地または距離(km)
+ * @param to 目的地（distanceを直接指定する場合は不要）
  */
-export function determineTransportType(from: Location, to: Location): 'air' | 'land' {
+export function determineTransportType(from: Location | number, to?: Location): 'air' | 'land' {
+  // 距離が直接渡された場合
+  if (typeof from === 'number') {
+    const distance = from;
+    
+    // 700km以上の距離は強制的に空路に
+    if (distance >= 700) {
+      console.log(`  Determined as AIR due to long distance (${distance}km)`);
+      return 'air';
+    }
+    
+    // それ以外は陸路
+    console.log(`  Determined as LAND transportation for distance ${distance}km`);
+    return 'land';
+  }
+  
+  // 従来の実装（2つのLocation間の判定）
+  if (!to) {
+    throw new Error('目的地が指定されていません');
+  }
+  
   const distance = calculateDistance(from.coordinates, to.coordinates);
   
   // 空港名を含む場所間の移動は空路とする
@@ -111,21 +133,50 @@ export function determineTransportType(from: Location, to: Location): 'air' | 'l
 
 /**
  * 推定移動時間を計算（時間単位）
+ * @param from 出発地または距離(km)
+ * @param to 目的地または移動手段
+ * @param transportType 移動手段（distanceを直接指定する場合は第2引数に指定）
  */
-export function estimateTransportDuration(from: Location, to: Location, transportType: 'air' | 'land'): number {
-  const distance = calculateDistance(from.coordinates, to.coordinates);
-  
-  if (transportType === 'air') {
-    // 飛行機: 平均速度800km/hと空港での待ち時間2時間
-    // 短距離フライトに対する最小時間も設定
-    return Math.max(distance / 800 + 2, 3);
-  } else if (distance <= 50) {
-    // 近距離陸路: 平均速度40km/h（都市内や近郊）
-    return Math.max(distance / 40, 1);
-  } else {
-    // 長距離陸路: 平均速度60km/h（高速道路など）
-    return Math.max(distance / 60, 1);
+export function estimateTransportDuration(
+  from: Location | number, 
+  to: Location | 'air' | 'land', 
+  transportType?: 'air' | 'land'
+): number {
+  // Case 1: 距離が直接指定された場合
+  if (typeof from === 'number') {
+    const distance = from;
+    const mode = typeof to === 'string' ? to : 'land';
+    
+    if (mode === 'air') {
+      // 飛行機: 平均速度800km/hと空港での待ち時間2時間
+      // 短距離フライトに対する最小時間も設定
+      return Math.max(distance / 800 + 2, 3);
+    } else if (distance <= 50) {
+      // 近距離陸路: 平均速度40km/h（都市内や近郊）
+      return Math.max(distance / 40, 1);
+    } else {
+      // 長距離陸路: 平均速度60km/h（高速道路など）
+      return Math.max(distance / 60, 1);
+    }
   }
+  
+  // Case 2: 従来の実装（2つのLocation間の判定）
+  if (typeof to === 'object' && transportType) {
+    const distance = calculateDistance(from.coordinates, to.coordinates);
+    
+    if (transportType === 'air') {
+      // 飛行機: 平均速度800km/hと空港での待ち時間2時間
+      return Math.max(distance / 800 + 2, 3);
+    } else if (distance <= 50) {
+      // 近距離陸路: 平均速度40km/h
+      return Math.max(distance / 40, 1);
+    } else {
+      // 長距離陸路: 平均速度60km/h
+      return Math.max(distance / 60, 1);
+    }
+  }
+  
+  throw new Error('有効なパラメータが指定されていません');
 }
 
 /**
