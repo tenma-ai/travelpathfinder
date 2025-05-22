@@ -37,6 +37,10 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
   const [newLocationPriority, setNewLocationPriority] = useState(3);
   const [newLocationRequesters, setNewLocationRequesters] = useState<string[]>([]);
   
+  // 編集モード用state
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  
   // エラーメッセージ
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   
@@ -201,9 +205,100 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
   };
   
   /**
+   * 希望地の編集モードを開始
+   */
+  const handleEditLocation = (location: DesiredLocation) => {
+    setIsEditingLocation(true);
+    setEditingLocationId(location.id);
+    setNewLocationName(location.location.name);
+    setNewLocationDuration(location.stayDuration);
+    setNewLocationPriority(location.priority);
+    setNewLocationRequesters([...location.requesters]);
+    
+    // 候補のクリア
+    setNewLocationSuggestions([]);
+  };
+
+  /**
+   * 編集モードをキャンセル
+   */
+  const handleCancelEdit = () => {
+    setIsEditingLocation(false);
+    setEditingLocationId(null);
+    setNewLocationName('');
+    setNewLocationDuration(24);
+    setNewLocationPriority(3);
+    setNewLocationRequesters([]);
+    
+    // エラーのクリア
+    setErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors.newLocation;
+      delete newErrors.newLocationRequesters;
+      return newErrors;
+    });
+  };
+
+  /**
+   * 希望地の更新
+   */
+  const handleUpdateLocation = async () => {
+    if (!editingLocationId) return;
+    
+    if (!newLocationName.trim()) {
+      setErrors(prev => ({ ...prev, newLocation: '希望地を入力してください' }));
+      return;
+    }
+    
+    if (newLocationRequesters.length === 0) {
+      setErrors(prev => ({ ...prev, newLocationRequesters: '希望者を選択してください' }));
+      return;
+    }
+    
+    const location = await geocodeLocation(newLocationName);
+    if (location) {
+      // 既存の希望地を更新
+      setDesiredLocations(prev => prev.map(loc => 
+        loc.id === editingLocationId
+          ? {
+              ...loc,
+              location,
+              priority: newLocationPriority,
+              stayDuration: newLocationDuration,
+              requesters: [...newLocationRequesters]
+            }
+          : loc
+      ));
+      
+      // 編集モードをリセット
+      setIsEditingLocation(false);
+      setEditingLocationId(null);
+      setNewLocationName('');
+      setNewLocationDuration(24);
+      setNewLocationPriority(3);
+      setNewLocationRequesters([]);
+      
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors.newLocation;
+        delete newErrors.newLocationRequesters;
+        return newErrors;
+      });
+    } else {
+      setErrors(prev => ({ ...prev, newLocation: '希望地が見つかりませんでした' }));
+    }
+  };
+
+  /**
    * 新しい希望地を追加
    */
   const handleAddLocation = async (suggestion?: string) => {
+    // 編集モードの場合は更新処理を実行
+    if (isEditingLocation) {
+      handleUpdateLocation();
+      return;
+    }
+    
     const locationNameToUse = suggestion || newLocationName;
     
     if (!locationNameToUse.trim()) {
@@ -547,13 +642,22 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
                         優先度: {loc.priority}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLocation(loc.id)}
-                      className="text-red-500"
-                    >
-                      削除
-                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditLocation(loc)}
+                        className="text-blue-500 hover:text-blue-700"
+                      >
+                        編集
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLocation(loc.id)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        削除
+                      </button>
+                    </div>
                   </div>
                   <div className="text-sm">
                     <span className="font-medium">希望者: </span>
@@ -591,7 +695,9 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
           {/* 希望地追加フォーム */}
           {members.length > 0 && (
             <div className="border rounded-lg p-4">
-              <h4 className="font-medium mb-3 text-black">新しい希望地を追加</h4>
+              <h4 className="font-medium mb-3 text-black">
+                {isEditingLocation ? '希望地を編集' : '新しい希望地を追加'}
+              </h4>
               
               <div className="space-y-4">
                 <div>
@@ -709,15 +815,34 @@ const GroupTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: 
                   )}
                 </div>
                 
-                {/* 希望地追加ボタン */}
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => handleAddLocation()}
-                    className="w-full bg-black text-white py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-                  >
-                    希望地を追加
-                  </button>
+                {/* 追加/更新ボタン */}
+                <div className="mt-4 flex space-x-2">
+                  {isEditingLocation ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleUpdateLocation}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                      >
+                        更新
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="flex-1 bg-gray-500 text-white py-2 rounded-lg font-medium hover:bg-gray-600 transition-colors"
+                      >
+                        キャンセル
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleAddLocation()}
+                      className="w-full bg-black text-white py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
+                    >
+                      希望地を追加
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

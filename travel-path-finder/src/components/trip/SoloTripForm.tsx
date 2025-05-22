@@ -33,6 +33,10 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
   const [newLocationDuration, setNewLocationDuration] = useState(24); // 24時間(1日)をデフォルト値に
   const [newLocationPriority, setNewLocationPriority] = useState(3);
   
+  // 編集モード用state
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  
   // エラーメッセージ
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
@@ -131,9 +135,89 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
   };
   
   /**
+   * 希望地の編集モードを開始
+   */
+  const handleEditLocation = (location: DesiredLocation) => {
+    setIsEditingLocation(true);
+    setEditingLocationId(location.id);
+    setNewLocationName(location.location.name);
+    setNewLocationDuration(location.stayDuration);
+    setNewLocationPriority(location.priority);
+    
+    // 候補のクリア
+    setNewLocationSuggestions([]);
+  };
+
+  /**
+   * 編集モードをキャンセル
+   */
+  const handleCancelEdit = () => {
+    setIsEditingLocation(false);
+    setEditingLocationId(null);
+    setNewLocationName('');
+    setNewLocationDuration(24);
+    setNewLocationPriority(3);
+    
+    // エラーのクリア
+    setErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors.newLocation;
+      return newErrors;
+    });
+  };
+
+  /**
+   * 希望地の更新
+   */
+  const handleUpdateLocation = async () => {
+    if (!editingLocationId) return;
+    
+    if (!newLocationName.trim()) {
+      setErrors(prev => ({ ...prev, newLocation: '希望地を入力してください' }));
+      return;
+    }
+    
+    const location = await geocodeLocation(newLocationName);
+    if (location) {
+      // 既存の希望地を更新
+      setDesiredLocations(prev => prev.map(loc => 
+        loc.id === editingLocationId
+          ? {
+              ...loc,
+              location,
+              priority: newLocationPriority,
+              stayDuration: newLocationDuration
+            }
+          : loc
+      ));
+      
+      // 編集モードをリセット
+      setIsEditingLocation(false);
+      setEditingLocationId(null);
+      setNewLocationName('');
+      setNewLocationDuration(24);
+      setNewLocationPriority(3);
+      
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors.newLocation;
+        return newErrors;
+      });
+    } else {
+      setErrors(prev => ({ ...prev, newLocation: '希望地が見つかりませんでした' }));
+    }
+  };
+
+  /**
    * 新しい希望地を追加
    */
   const handleAddLocation = async (suggestion?: string) => {
+    // 編集モードの場合は更新処理を実行
+    if (isEditingLocation) {
+      handleUpdateLocation();
+      return;
+    }
+    
     const locationNameToUse = suggestion || newLocationName;
     
     if (!locationNameToUse.trim()) {
@@ -406,13 +490,22 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
                       優先度: {loc.priority}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveLocation(loc.id)}
-                    className="text-red-500"
-                  >
-                    削除
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => handleEditLocation(loc)}
+                      className="text-blue-500 hover:text-blue-700"
+                    >
+                      編集
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveLocation(loc.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      削除
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -428,7 +521,9 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
           
           {/* 希望地追加フォーム */}
           <div className="border rounded-lg p-4">
-            <h4 className="font-medium mb-3 text-black">新しい希望地を追加</h4>
+            <h4 className="font-medium mb-3 text-black">
+              {isEditingLocation ? '希望地を編集' : '新しい希望地を追加'}
+            </h4>
             
             <div className="space-y-3">
               <div>
@@ -515,15 +610,34 @@ const SoloTripForm = ({ onSubmit, initialTripInfo, isAddingLocation = false }: S
                 </div>
               </div>
               
-              {/* 希望地追加ボタン */}
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => handleAddLocation()}
-                  className="w-full bg-black text-white py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-                >
-                  希望地を追加
-                </button>
+              {/* 追加/更新ボタン */}
+              <div className="mt-4 flex space-x-2">
+                {isEditingLocation ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleUpdateLocation}
+                      className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      更新
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="flex-1 bg-gray-500 text-white py-2 rounded-lg font-medium hover:bg-gray-600 transition-colors"
+                    >
+                      キャンセル
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleAddLocation()}
+                    className="w-full bg-black text-white py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
+                  >
+                    希望地を追加
+                  </button>
+                )}
               </div>
             </div>
           </div>

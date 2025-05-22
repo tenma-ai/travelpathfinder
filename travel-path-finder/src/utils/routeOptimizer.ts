@@ -149,46 +149,87 @@ function generateLocationCombinations(tripInfo: TripInfo): DesiredLocation[][] {
     maxDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   } else {
     // 終了日が指定されていない場合は、全ての希望地の滞在日数の合計の1.5倍を仮定
-    const totalDesiredDays = desiredLocations.reduce((sum, loc) => sum + loc.stayDuration, 0);
+    const totalDesiredDays = desiredLocations.reduce((sum, loc) => sum + loc.stayDuration / 24, 0);
     maxDays = Math.ceil(totalDesiredDays * 1.5);
   }
   
-  // 単純な例: すべてのメンバーから最低1つの希望地を含む組み合わせ
-  // 実際には組合せ最適化アルゴリズムを使用する必要がある
-  
-  // 各メンバーの希望地を抽出
-  const memberDesires = members.map(member => {
-    return desiredLocations.filter(loc => loc.requesters.includes(member.id));
-  });
-  
   // シンプルな貪欲法: 優先度の高い順に選定
   const selectedLocations: DesiredLocation[] = [];
-  let totalDays = 0;
+  let totalHours = 0;
   
-  // ソート済み希望地リスト（優先度高→低）
-  const sortedLocations = [...desiredLocations].sort((a, b) => b.priority - a.priority);
+  // 各メンバーの希望地を優先度付きで取得
+  let memberPriorityLocs: { member: Member, locations: DesiredLocation[] }[] = [];
   
-  // まず各メンバーから少なくとも1つの希望地を選択
   for (const member of members) {
-    const memberLocs = sortedLocations.filter(loc => 
-      loc.requesters.includes(member.id) && 
-      !selectedLocations.includes(loc)
-    );
+    const memberLocs = desiredLocations
+      .filter(loc => loc.requesters.includes(member.id))
+      .sort((a, b) => b.priority - a.priority);
     
-    if (memberLocs.length > 0) {
-      const topLoc = memberLocs[0];
-      if (totalDays + topLoc.stayDuration <= maxDays) {
-        selectedLocations.push(topLoc);
-        totalDays += topLoc.stayDuration;
-      }
-    }
+    memberPriorityLocs.push({ member, locations: memberLocs });
   }
   
-  // 残りの日数で追加の希望地を選択
-  for (const loc of sortedLocations) {
-    if (!selectedLocations.includes(loc) && totalDays + loc.stayDuration <= maxDays) {
-      selectedLocations.push(loc);
-      totalDays += loc.stayDuration;
+  // メンバーの希望地の数を計算
+  const memberLocationCounts = new Map<string, number>();
+  members.forEach(member => {
+    memberLocationCounts.set(member.id, 0);
+  });
+  
+  // 各メンバーから公平に選択するように、ラウンドロビン方式で選ぶ
+  let continueSelection = true;
+  let round = 0;
+  
+  while (continueSelection) {
+    continueSelection = false;
+    
+    // メンバーをシャッフル - 毎ラウンド順番が変わるように
+    const shuffledMemberPriorityLocs = [...memberPriorityLocs]
+      .sort(() => Math.random() - 0.5);
+    
+    for (const { member, locations } of shuffledMemberPriorityLocs) {
+      // このメンバーの現在のラウンドでまだ選ばれていない希望地を取得
+      const availableLocations = locations.filter(loc => 
+        !selectedLocations.includes(loc) && 
+        totalHours + loc.stayDuration <= maxDays * 24
+      );
+      
+      if (availableLocations.length > 0) {
+        // 優先度が最も高い希望地を選択
+        const topLocation = availableLocations[0];
+        
+        // まだ選択されていない場合のみ追加
+        if (!selectedLocations.includes(topLocation)) {
+          selectedLocations.push(topLocation);
+          totalHours += topLocation.stayDuration;
+          
+          // このメンバーの選ばれた希望地の数を増やす
+          const currentCount = memberLocationCounts.get(member.id) || 0;
+          memberLocationCounts.set(member.id, currentCount + 1);
+          
+          continueSelection = true;
+        }
+      }
+    }
+    
+    round++;
+    // 無限ループ防止: 10ラウンド以上は回さない
+    if (round >= 10) break;
+  }
+  
+  // 残りの日数で追加の希望地を選択 - リクエスト数が少ないメンバーの希望を優先
+  const sortedByRequestCount = [...memberPriorityLocs]
+    .sort((a, b) => {
+      const countA = memberLocationCounts.get(a.member.id) || 0;
+      const countB = memberLocationCounts.get(b.member.id) || 0;
+      return countA - countB; // リクエスト数が少ない順
+    });
+  
+  // リクエスト数が少ないメンバーから順に追加希望地を検討
+  for (const { member, locations } of sortedByRequestCount) {
+    for (const loc of locations) {
+      if (!selectedLocations.includes(loc) && totalHours + loc.stayDuration <= maxDays * 24) {
+        selectedLocations.push(loc);
+        totalHours += loc.stayDuration;
+      }
     }
   }
   
