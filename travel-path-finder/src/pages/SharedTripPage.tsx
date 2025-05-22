@@ -17,6 +17,7 @@ const SharedTripPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
 
   // 共有コードから旅行情報を取得
@@ -81,6 +82,13 @@ const SharedTripPage = () => {
   // 希望地を追加するフォームを表示
   const handleAddLocation = () => {
     setShowAddLocationForm(true);
+    setIsEditMode(false);
+  };
+
+  // 編集モードの切り替え
+  const handleToggleEditMode = () => {
+    setIsEditMode(!isEditMode);
+    setShowAddLocationForm(false);
   };
 
   // フォーム送信処理
@@ -99,6 +107,7 @@ const SharedTripPage = () => {
       console.log('SharedTripPage: 旅程生成完了', updatedTripInfo);
       setTripInfo(updatedTripInfo);
       setShowAddLocationForm(false);
+      setIsEditMode(false);
     } catch (error) {
       console.error('SharedTripPage: 旅程生成失敗', error);
       setError(`旅程の生成に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
@@ -183,18 +192,62 @@ const SharedTripPage = () => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
+  // ヘッダーボタンの表示とイベント処理を決定
+  const renderHeaderButton = () => {
+    if (showAddLocationForm) {
+      return (
         <button
-          onClick={showAddLocationForm ? () => setShowAddLocationForm(false) : handleBackToHome}
+          onClick={() => setShowAddLocationForm(false)}
           className="mb-6 flex items-center text-gray-600 hover:text-black"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
           </svg>
-          {showAddLocationForm ? "旅行計画に戻る" : "修正する"}
+          旅行計画に戻る
         </button>
+      );
+    } else if (isEditMode) {
+      return (
+        <button
+          onClick={() => setIsEditMode(false)}
+          className="mb-6 flex items-center text-gray-600 hover:text-black"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+          </svg>
+          編集をキャンセル
+        </button>
+      );
+    } else {
+      return (
+        <div className="flex items-center mb-6 gap-4">
+          <button
+            onClick={handleToggleEditMode}
+            className="flex items-center text-gray-600 hover:text-black"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+            </svg>
+            修正する
+          </button>
+          <button
+            onClick={handleBackToHome}
+            className="flex items-center text-gray-600 hover:text-black ml-4"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+            </svg>
+            ホームに戻る
+          </button>
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-6xl mx-auto">
+        {renderHeaderButton()}
 
         {showAddLocationForm && tripInfo ? (
           tripInfo.tripType === 'solo' ? (
@@ -208,6 +261,18 @@ const SharedTripPage = () => {
               onSubmit={handleFormSubmit}
               initialTripInfo={tripInfo}
               isAddingLocation={true}
+            />
+          )
+        ) : isEditMode ? (
+          tripInfo.tripType === 'solo' ? (
+            <SoloTripForm
+              onSubmit={handleFormSubmit}
+              initialTripInfo={tripInfo}
+            />
+          ) : (
+            <GroupTripForm
+              onSubmit={handleFormSubmit}
+              initialTripInfo={tripInfo}
             />
           )
         ) : tripInfo.generatedItinerary ? (
