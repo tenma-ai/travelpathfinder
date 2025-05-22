@@ -66,10 +66,82 @@ function validateTripData(tripInfo: TripInfo): void {
 }
 
 /**
+ * 最適化された移動順序を計算する（近似的巡回セールスマン問題解法）
+ * @param departureLocation 出発地点
+ * @param locations 訪問したい場所のリスト
+ * @param returnToDeparture 出発地に戻るかどうか
+ * @returns 最適化された訪問順序
+ */
+function optimizeRouteOrder(
+  departureLocation: Location,
+  locations: DesiredLocation[],
+  returnToDeparture: boolean
+): DesiredLocation[] {
+  // 場所が0または1つの場合はそのまま返す
+  if (locations.length <= 1) return [...locations];
+  
+  // 全ての地点の距離行列を計算
+  const allLocations = [departureLocation, ...locations.map(loc => loc.location)];
+  const distanceMatrix: number[][] = [];
+  
+  for (let i = 0; i < allLocations.length; i++) {
+    distanceMatrix[i] = [];
+    for (let j = 0; j < allLocations.length; j++) {
+      if (i === j) {
+        distanceMatrix[i][j] = 0;
+      } else {
+        distanceMatrix[i][j] = calculateDistance(
+          allLocations[i].coordinates,
+          allLocations[j].coordinates
+        );
+      }
+    }
+  }
+  
+  // 最近傍法（Nearest Neighbor）による経路構築
+  const visited = new Array(locations.length + 1).fill(false);
+  visited[0] = true; // 出発地はすでに訪問済み
+  
+  const path: number[] = [0]; // 出発地からスタート
+  let currentNode = 0;
+  
+  // 全ての地点を訪問するまで繰り返す
+  while (path.length < locations.length + 1) {
+    let minDistance = Infinity;
+    let nearestNode = -1;
+    
+    // 現在地から最も近い未訪問の地点を見つける
+    for (let i = 1; i < allLocations.length; i++) {
+      if (!visited[i] && distanceMatrix[currentNode][i] < minDistance) {
+        minDistance = distanceMatrix[currentNode][i];
+        nearestNode = i;
+      }
+    }
+    
+    if (nearestNode !== -1) {
+      // 最も近い未訪問地点を経路に追加
+      path.push(nearestNode);
+      visited[nearestNode] = true;
+      currentNode = nearestNode;
+    }
+  }
+  
+  // 出発地に戻る場合は最後に出発地を追加
+  if (returnToDeparture) {
+    path.push(0);
+  }
+  
+  // 最適化された順序で希望地を並べ替え
+  return path
+    .slice(1, returnToDeparture ? -1 : undefined) // 最初と最後（出発地）を除去
+    .map(index => locations[index - 1]); // インデックスを希望地に変換
+}
+
+/**
  * 実現可能な希望地の組み合わせを生成
  */
 function generateLocationCombinations(tripInfo: TripInfo): DesiredLocation[][] {
-  const { members, desiredLocations, startDate, endDate } = tripInfo;
+  const { members, desiredLocations, startDate, endDate, departureLocation, returnToDeparture } = tripInfo;
   
   // 旅行の最大日数
   let maxDays: number;
@@ -120,15 +192,18 @@ function generateLocationCombinations(tripInfo: TripInfo): DesiredLocation[][] {
     }
   }
   
-  // ここでは簡略化のため、1つの組み合わせのみ返す
-  return [selectedLocations];
+  // 選択した場所の順序を最適化
+  const optimizedLocations = optimizeRouteOrder(departureLocation, selectedLocations, returnToDeparture);
+  
+  // 最適化された順序の組み合わせを返す
+  return [optimizedLocations];
 }
 
 /**
  * 旅程を生成
  */
 async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: TripInfo): Promise<Itinerary> {
-  const { departureLocation, startDate, returnToDeparture } = tripInfo;
+  const { departureLocation, startDate, endDate, returnToDeparture } = tripInfo;
   
   const itineraryId = uuidv4();
   const itineraryLocations: ItineraryLocation[] = [];
@@ -414,6 +489,119 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
       
       itineraryLocations.push(returnLoc);
       routes.push(returnRoute);
+    }
+  }
+  
+  // 終了日が指定されている場合、旅程を調整して終了日に収まるようにする
+  if (tripInfo.endDate) {
+    const lastLocation = itineraryLocations[itineraryLocations.length - 1];
+    const scheduledEndDate = lastLocation.arrivalDate;
+    
+    // 旅程が終了日を超える場合
+    if (scheduledEndDate > tripInfo.endDate) {
+      console.log('旅程が終了日を超えています。滞在日数を調整します。');
+      
+      // 超過日数
+      const overDays = Math.ceil((scheduledEndDate.getTime() - tripInfo.endDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      // 場所ごとの滞在日数を比例配分で削減
+      const locationsTrimmed: ItineraryLocation[] = [];
+      const totalStayDays = selectedLocations.reduce((sum, loc) => sum + loc.stayDuration, 0);
+      let remainingDaysToTrim = overDays;
+      
+      // 前の場所の出発日を追跡（各移動の日数計算に必要）
+      let previousDepartureDate = new Date(startDate);
+      
+      // 最初の出発地点を追加
+      locationsTrimmed.push({
+        ...itineraryLocations[0],
+        arrivalDate: new Date(startDate),
+        departureDate: new Date(startDate)
+      });
+      
+      // 各場所の滞在日数を調整（空港を除く実際の訪問場所のみ）
+      for (let i = 1; i < itineraryLocations.length; i++) {
+        const currentLoc = itineraryLocations[i];
+        
+        // 空港は滞在日数を持たないので調整不要、ただし到着日と出発日を更新
+        if (
+          (currentLoc.location.name.includes('空港') || 
+           currentLoc.location.name.toLowerCase().includes('airport')) &&
+          currentLoc.arrivalDate.getTime() === currentLoc.departureDate.getTime()
+        ) {
+          // 前の場所からの移動日数を計算
+          const routeToAirport = routes.find(route => route.to === currentLoc.id);
+          const travelDays = routeToAirport ? Math.ceil(routeToAirport.estimatedDuration / 24) : 1;
+          
+          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
+          
+          locationsTrimmed.push({
+            ...currentLoc,
+            arrivalDate: newArrivalDate,
+            departureDate: newArrivalDate  // 空港での滞在はなし
+          });
+          
+          previousDepartureDate = newArrivalDate;
+          continue;
+        }
+        
+        // 滞在場所の場合は、滞在日数を調整
+        const originalStayDuration = currentLoc.departureDate.getTime() - currentLoc.arrivalDate.getTime();
+        const stayDays = Math.ceil(originalStayDuration / (1000 * 60 * 60 * 24));
+        
+        // この場所の滞在日数が1日以上なら調整可能
+        if (stayDays > 1) {
+          // 比例配分で削減日数を計算（少なくとも1日は滞在）
+          const proportionalShare = Math.min(
+            Math.floor(stayDays * (remainingDaysToTrim / totalStayDays)), 
+            stayDays - 1
+          );
+          
+          // 前の場所からの移動日数を計算
+          const routeToHere = routes.find(route => route.to === currentLoc.id);
+          const travelDays = routeToHere ? Math.ceil(routeToHere.estimatedDuration / 24) : 1;
+          
+          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
+          const newStayDays = Math.max(stayDays - proportionalShare, 1);
+          const newDepartureDate = new Date(newArrivalDate.getTime() + newStayDays * 24 * 60 * 60 * 1000);
+          
+          locationsTrimmed.push({
+            ...currentLoc,
+            arrivalDate: newArrivalDate,
+            departureDate: newDepartureDate
+          });
+          
+          previousDepartureDate = newDepartureDate;
+          remainingDaysToTrim -= proportionalShare;
+        } else {
+          // 滞在日数が1日以下なら調整不可、そのまま追加
+          const routeToHere = routes.find(route => route.to === currentLoc.id);
+          const travelDays = routeToHere ? Math.ceil(routeToHere.estimatedDuration / 24) : 1;
+          
+          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
+          const newDepartureDate = new Date(newArrivalDate.getTime() + 24 * 60 * 60 * 1000); // 1日滞在
+          
+          locationsTrimmed.push({
+            ...currentLoc,
+            arrivalDate: newArrivalDate,
+            departureDate: newDepartureDate
+          });
+          
+          previousDepartureDate = newDepartureDate;
+        }
+      }
+      
+      // 調整後の最終日が終了日を超えていないか確認
+      const adjustedLastDate = locationsTrimmed[locationsTrimmed.length - 1].arrivalDate;
+      
+      if (adjustedLastDate <= tripInfo.endDate) {
+        // 調整に成功した場合、調整後の旅程を使用
+        itineraryLocations.splice(0, itineraryLocations.length, ...locationsTrimmed);
+      } else {
+        // 調整しても収まらない場合は、警告を出す
+        console.warn('滞在日数を調整しても旅程が終了日に収まりません。一部の目的地を削除する必要があります。');
+        // この場合は、generateLocationCombinations側でより少ない目的地を選択する必要がある
+      }
     }
   }
   

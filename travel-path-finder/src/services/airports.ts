@@ -160,7 +160,7 @@ export async function findNearestAirport(coordinates: [number, number]): Promise
         { name: 'Beijing Capital International Airport', coordinates: [116.5977, 40.0799] },
         { name: 'Shanghai Pudong International Airport', coordinates: [121.8086, 31.1443] },
         { name: 'Guangzhou Baiyun International Airport', coordinates: [113.2964, 23.3959] },
-        { name: 'Shenzhen Bao'an International Airport', coordinates: [113.8145, 22.6395] },
+        { name: "Shenzhen Bao'an International Airport", coordinates: [113.8145, 22.6395] },
         { name: 'Chengdu Shuangliu International Airport', coordinates: [103.9475, 30.5785] },
         // 香港、マカオ、台湾
         { name: 'Hong Kong International Airport', coordinates: [113.9184, 22.3080] },
@@ -222,7 +222,7 @@ export async function findNearestAirport(coordinates: [number, number]): Promise
         { name: 'Christchurch International Airport', coordinates: [172.5369, -43.4864] },
         // その他太平洋諸島
         { name: 'Nadi International Airport', coordinates: [177.4438, -17.7556] }, // フィジー
-        { name: 'Faa'a International Airport', coordinates: [-149.6065, -17.5553] } // タヒチ、フランス領ポリネシア
+        { name: "Faa'a International Airport", coordinates: [-149.6065, -17.5553] } // タヒチ、フランス領ポリネシア
       ]
     };
     
