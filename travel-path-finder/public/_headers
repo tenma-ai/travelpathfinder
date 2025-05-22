@@ -1,0 +1,16 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  X-XSS-Protection: 1; mode=block
+  # キャッシュ設定
+  Cache-Control: public, max-age=0, must-revalidate
+  # URLの長さ制限を緩和するヘッダー
+  Large-Allocation: off
+
+# 共有ページ用の追加設定
+/shared/*
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# 旅行参加ページ用の追加設定
+/join-trip/*
+  Cache-Control: no-cache, no-store, must-revalidate 
