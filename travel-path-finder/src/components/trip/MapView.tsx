@@ -13,7 +13,6 @@ mapboxgl.accessToken = MAPBOX_API_KEY;
 const TRANSPORT_COLORS = {
   air: '#3b82f6', // 青色
   land: '#22c55e', // 緑色
-  sea: '#0ea5e9'  // 水色
 };
 
 interface MapViewProps {
@@ -133,24 +132,6 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
           'line-dasharray': [2, 1]
         },
         filter: ['==', ['get', 'transportType'], 'air']
-      });
-      
-      // 経路ライン - 海路
-      mapInstance.addLayer({
-        id: 'route-line-sea',
-        type: 'line',
-        source: 'route-source',
-        layout: {
-          'line-join': 'round',
-          'line-cap': 'round'
-        },
-        paint: {
-          'line-color': TRANSPORT_COLORS.sea,
-          'line-width': 3,
-          'line-opacity': 0.8,
-          'line-dasharray': [3, 2]
-        },
-        filter: ['==', ['get', 'transportType'], 'sea']
       });
       
       // 経路の点（出発点、到着点など）
@@ -392,7 +373,7 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
           <div style={{ width: 20, height: 3, backgroundColor: TRANSPORT_COLORS.land, marginRight: 4 }} />
           <span>陸路</span>
         </div>
-        <div className="flex items-center mb-1">
+        <div className="flex items-center">
           <div style={{ 
             width: 20, 
             height: 3, 
@@ -401,16 +382,6 @@ const MapView = ({ itinerary, members }: MapViewProps) => {
             marginRight: 4
           }} />
           <span>空路</span>
-        </div>
-        <div className="flex items-center">
-          <div style={{ 
-            width: 20, 
-            height: 3, 
-            backgroundImage: `linear-gradient(to right, ${TRANSPORT_COLORS.sea} 50%, transparent 50%)`,
-            backgroundSize: '8px 3px',
-            marginRight: 4
-          }} />
-          <span>海路</span>
         </div>
       </div>
     </div>

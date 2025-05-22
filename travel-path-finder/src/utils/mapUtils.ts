@@ -29,10 +29,18 @@ function toRad(degrees: number): number {
 
 /**
  * 2地点間の移動に最適な交通手段を決定
- * 海路は除外し、陸路と空路のみを扱う
+ * 陸路と空路のみを扱う
  */
 export function determineTransportType(from: Location, to: Location): 'air' | 'land' {
   const distance = calculateDistance(from.coordinates, to.coordinates);
+  
+  // 空港名を含む場所間の移動は空路とする
+  const isFromAirport = from.name.includes('空港') || from.name.toLowerCase().includes('airport');
+  const isToAirport = to.name.includes('空港') || to.name.toLowerCase().includes('airport');
+  
+  if (isFromAirport && isToAirport) {
+    return 'air';
+  }
   
   // 700km以上の距離は強制的に空路に
   if (distance >= 700) {

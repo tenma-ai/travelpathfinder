@@ -47,7 +47,7 @@ export interface Route {
   id: string;
   from: string; // ItineraryLocation ID
   to: string; // ItineraryLocation ID
-  transportType: 'air' | 'land' | 'sea';
+  transportType: 'air' | 'land';
   estimatedDuration: number; // 時間単位
 }
 

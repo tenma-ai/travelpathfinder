@@ -18,7 +18,7 @@ const CalendarView = ({ itinerary, members }: CalendarViewProps) => {
     locations: ItineraryLocation[];
     startLocation?: string;
     endLocation?: string;
-    transportType?: 'air' | 'land' | 'sea';
+    transportType?: 'air' | 'land';
   }>>({});
   
   // カレンダーデータの生成
@@ -104,11 +104,9 @@ const CalendarView = ({ itinerary, members }: CalendarViewProps) => {
   };
   
   // 移動タイプのアイコン
-  const TransportIcon = ({ type }: { type?: 'air' | 'land' | 'sea' }) => {
+  const TransportIcon = ({ type }: { type?: 'air' | 'land' }) => {
     if (type === 'air') {
       return <img src="/airplane.png" alt="飛行機" className="w-4 h-4" />;
-    } else if (type === 'sea') {
-      return <span>🚢</span>; // 海路のアイコンは変更なし
     } else {
       return <img src="/car.png" alt="車" className="w-4 h-4" />;
     }

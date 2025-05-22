@@ -327,7 +327,7 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
         currentPosition = nextPosition;
       }
     } 
-    // 陸路/海路の場合は従来通りの直接移動
+    // 陸路の場合は従来通りの直接移動
     else {
       // 移動時間を計算
       const travelDuration = estimateTransportDuration(prevLocation, desiredLoc.location, transportType);
@@ -464,7 +464,7 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
         currentPosition = nextPosition;
       }
     }
-    // 陸路/海路の場合は従来通りの直接移動
+    // 陸路の場合は従来通りの直接移動
     else {
       const travelDuration = estimateTransportDuration(lastLoc, departureLocation, transportType);
       const travelDays = Math.ceil(travelDuration / 24);

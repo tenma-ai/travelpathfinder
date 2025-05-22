@@ -27,18 +27,10 @@ const VisualFlow = ({ itinerary, members }: VisualFlowProps) => {
   };
   
   // 交通手段のアイコン
-  const TransportIcon = ({ type }: { type: 'air' | 'land' | 'sea' }) => {
+  const TransportIcon = ({ type }: { type: 'air' | 'land' }) => {
     if (type === 'air') {
       return (
         <img src="/airplane.png" alt="飛行機" className="w-4 h-4" />
-      );
-    }
-    
-    if (type === 'sea') {
-      return (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 8V4m0 0h.01M12 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v8m8-8a4 4 0 10-8 0 4 4 0 008 0z" />
-        </svg>
       );
     }
     
@@ -110,8 +102,7 @@ const VisualFlow = ({ itinerary, members }: VisualFlowProps) => {
                   </div>
                   <div className="text-sm">
                     <div className="font-medium">
-                      {itinerary.routes[index].transportType === 'air' ? '空路' : 
-                       itinerary.routes[index].transportType === 'sea' ? '海路' : '陸路'}
+                      {itinerary.routes[index].transportType === 'air' ? '空路' : '陸路'}
                     </div>
                     <div className="text-gray-600">
                       {formatDuration(itinerary.routes[index].estimatedDuration)}
