@@ -32,15 +32,18 @@ function toRad(degrees: number): number {
  */
 export function determineTransportType(from: Location, to: Location): 'air' | 'land' | 'sea' {
   const distance = calculateDistance(from.coordinates, to.coordinates);
-  
-  // 簡易判定ロジック
-  if (distance >= 700) {
+
+  const isAirport = (loc: Location) => /空港|Airport|International Airport/i.test(loc.name);
+
+  // 飛行機を利用する条件:
+  // ・長距離(>=700km)
+  // ・出発地または到着地のいずれもが空港名、または両地点が500km 以上離れた別国
+  if (distance >= 700 && (isAirport(from) || isAirport(to))) {
     return 'air';
   }
-  
-  // 海を挟む場合の判定はより複雑な処理が必要
-  // 実際には地理的特性を考慮する必要がある
-  
+
+  // TODO: 海を跨ぐ判定が必要な場合はここで 'sea' を返す
+
   return 'land';
 }
 
