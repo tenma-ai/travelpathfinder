@@ -58,11 +58,15 @@ export function estimateTransportDuration(from: Location, to: Location, transpor
   const distance = calculateDistance(from.coordinates, to.coordinates);
   
   if (transportType === 'air') {
-    // 飛行機: 平均速度800km/hと空港での3時間
-    return distance / 800 + 3;
+    // 飛行機: 平均速度800km/hと空港での待ち時間2時間
+    // 短距離フライトに対する最小時間も設定
+    return Math.max(distance / 800 + 2, 3);
+  } else if (distance <= 50) {
+    // 近距離陸路: 平均速度40km/h（都市内や近郊）
+    return Math.max(distance / 40, 1);
   } else {
-    // 陸路: 平均速度20km/h
-    return distance / 20;
+    // 長距離陸路: 平均速度60km/h（高速道路など）
+    return Math.max(distance / 60, 1);
   }
 }
 

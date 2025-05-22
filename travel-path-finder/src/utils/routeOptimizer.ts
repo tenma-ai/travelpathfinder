@@ -21,21 +21,57 @@ export async function generateOptimalRoute(tripInfo: TripInfo): Promise<Itinerar
   }
   
   // 3. 各候補に対してスコアを計算
-  const scoredCombinationsPromises = locationCombinations.map(async combo => {
-    const itinerary = await createItinerary(combo, tripInfo);
-    const equalityScore = calculateEqualityScore(itinerary, members);
-    const efficiencyScore = calculateEfficiencyScore(itinerary);
-    
-    // 総合スコア (等価性:0.7, 効率性:0.3 の重み付け)
-    const totalScore = 0.7 * equalityScore + 0.3 * efficiencyScore;
-    
-    return { itinerary, totalScore, equalityScore, efficiencyScore };
+  const scoredCombinationsPromises = locationCombinations.map(async (combo, index) => {
+    try {
+      const itinerary = await createItinerary(combo, tripInfo);
+      
+      // 各メンバーが少なくとも1つの希望地を訪問できているか確認
+      const memberVisitCounts = new Map<string, number>();
+      members.forEach(member => memberVisitCounts.set(member.id, 0));
+      
+      itinerary.locations.forEach(loc => {
+        loc.originalRequesters.forEach(requesterId => {
+          const count = memberVisitCounts.get(requesterId) || 0;
+          memberVisitCounts.set(requesterId, count + 1);
+        });
+      });
+      
+      // 少なくとも1つの希望地を訪問できないメンバーがいる場合のペナルティ
+      const allMembersHaveOneVisit = Array.from(memberVisitCounts.values()).every(count => count > 0);
+      
+      const equalityScore = calculateEqualityScore(itinerary, members);
+      const efficiencyScore = calculateEfficiencyScore(itinerary);
+      
+      // 総合スコア (等価性:0.6, 効率性:0.3, 全メンバー訪問:0.1 の重み付け)
+      const memberVisitBonus = allMembersHaveOneVisit ? 1 : 0;
+      const totalScore = 0.6 * equalityScore + 0.3 * efficiencyScore + 0.1 * memberVisitBonus;
+      
+      return { itinerary, totalScore, equalityScore, efficiencyScore, memberVisitBonus, combinationIndex: index };
+    } catch (error) {
+      console.error(`Combination ${index} failed:`, error);
+      return null;
+    }
   });
   
-  const scoredCombinations = await Promise.all(scoredCombinationsPromises);
+  const scoredCombinations = (await Promise.all(scoredCombinationsPromises)).filter(result => result !== null);
   
-  // 4. 最適な組み合わせを選択
+  if (scoredCombinations.length === 0) {
+    throw new Error('有効な旅程を生成できませんでした。旅行期間を延長するか、希望地を減らしてください。');
+  }
+  
+  // 4. 最適な組み合わせを選択（スコアでソート）
   scoredCombinations.sort((a, b) => b.totalScore - a.totalScore);
+  
+  // トップ5の結果をログに出力（デバッグ用）
+  const top5 = scoredCombinations.slice(0, 5);
+  console.log('Top 5 itineraries:', top5.map(item => ({
+    score: item.totalScore,
+    equality: item.equalityScore,
+    efficiency: item.efficiencyScore,
+    memberVisit: item.memberVisitBonus,
+    locations: item.itinerary.locations.length,
+    lastDate: item.itinerary.locations[item.itinerary.locations.length - 1].departureDate
+  })));
   
   // 最適解を返す
   return scoredCombinations[0].itinerary;
@@ -143,101 +179,145 @@ function optimizeRouteOrder(
 function generateLocationCombinations(tripInfo: TripInfo): DesiredLocation[][] {
   const { members, desiredLocations, startDate, endDate, departureLocation, returnToDeparture } = tripInfo;
   
-  // 旅行の最大日数
-  let maxDays: number;
+  const combinations: DesiredLocation[][] = [];
+  
+  // 旅行の最大時間数
+  let maxHours: number;
   if (endDate) {
-    maxDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+    // 出発日と帰国日の差（時間単位）
+    maxHours = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
   } else {
-    // 終了日が指定されていない場合は、全ての希望地の滞在日数の合計の1.5倍を仮定
-    const totalDesiredDays = desiredLocations.reduce((sum, loc) => sum + loc.stayDuration / 24, 0);
-    maxDays = Math.ceil(totalDesiredDays * 1.5);
+    // 終了日が指定されていない場合は、全ての希望地の滞在時間の合計の1.5倍を仮定
+    const totalDesiredHours = desiredLocations.reduce((sum, loc) => sum + loc.stayDuration, 0);
+    maxHours = Math.ceil(totalDesiredHours * 1.5);
   }
   
-  // シンプルな貪欲法: 優先度の高い順に選定
-  const selectedLocations: DesiredLocation[] = [];
-  let totalHours = 0;
+  // 最低限必要な移動時間の概算（出発地と各希望地間の距離から）
+  const estimatedMinTravelHours = desiredLocations.reduce((sum, loc) => {
+    const distance = calculateDistance(departureLocation.coordinates, loc.location.coordinates);
+    // 距離に基づいて移動時間を概算（陸路なら時速60km、空路なら時速800kmと仮定）
+    const estimatedHours = distance > 700 ? distance / 800 : distance / 60;
+    return sum + estimatedHours;
+  }, 0);
   
-  // 各メンバーの希望地を優先度付きで取得
-  let memberPriorityLocs: { member: Member, locations: DesiredLocation[] }[] = [];
+  // 利用可能な滞在時間 = 最大時間 - 最低限の移動時間
+  const availableStayHours = Math.max(maxHours - estimatedMinTravelHours, 0);
   
-  for (const member of members) {
-    const memberLocs = desiredLocations
-      .filter(loc => loc.requesters.includes(member.id))
-      .sort((a, b) => b.priority - a.priority);
+  // 実際の旅程を作るには全希望地を入れられない可能性があるため、複数の候補を生成
+  
+  // 1. 全ての希望地を含む候補（自動終了日の場合や、期間が十分にある場合）
+  const allLocations = optimizeRouteOrder(departureLocation, [...desiredLocations], returnToDeparture);
+  combinations.push(allLocations);
+  
+  // 2. 各メンバーの優先度高い希望地のみを含む候補
+  if (endDate) {
+    // メンバーごとの希望地を抽出し、優先度でソート
+    const memberPriorityLocs: { member: Member, locations: DesiredLocation[] }[] = [];
     
-    memberPriorityLocs.push({ member, locations: memberLocs });
-  }
-  
-  // メンバーの希望地の数を計算
-  const memberLocationCounts = new Map<string, number>();
-  members.forEach(member => {
-    memberLocationCounts.set(member.id, 0);
-  });
-  
-  // 各メンバーから公平に選択するように、ラウンドロビン方式で選ぶ
-  let continueSelection = true;
-  let round = 0;
-  
-  while (continueSelection) {
-    continueSelection = false;
-    
-    // メンバーをシャッフル - 毎ラウンド順番が変わるように
-    const shuffledMemberPriorityLocs = [...memberPriorityLocs]
-      .sort(() => Math.random() - 0.5);
-    
-    for (const { member, locations } of shuffledMemberPriorityLocs) {
-      // このメンバーの現在のラウンドでまだ選ばれていない希望地を取得
-      const availableLocations = locations.filter(loc => 
-        !selectedLocations.includes(loc) && 
-        totalHours + loc.stayDuration <= maxDays * 24
-      );
+    for (const member of members) {
+      const memberLocs = desiredLocations
+        .filter(loc => loc.requesters.includes(member.id))
+        .sort((a, b) => b.priority - a.priority);
       
-      if (availableLocations.length > 0) {
-        // 優先度が最も高い希望地を選択
-        const topLocation = availableLocations[0];
-        
-        // まだ選択されていない場合のみ追加
-        if (!selectedLocations.includes(topLocation)) {
-          selectedLocations.push(topLocation);
-          totalHours += topLocation.stayDuration;
-          
-          // このメンバーの選ばれた希望地の数を増やす
-          const currentCount = memberLocationCounts.get(member.id) || 0;
-          memberLocationCounts.set(member.id, currentCount + 1);
-          
-          continueSelection = true;
+      memberPriorityLocs.push({ member, locations: memberLocs });
+    }
+    
+    // メンバー間での公平性と優先度を考慮した複数の組み合わせ候補を生成
+    for (let priorityThreshold = 5; priorityThreshold >= 3; priorityThreshold--) {
+      const highPriorityOnly = desiredLocations.filter(loc => loc.priority >= priorityThreshold);
+      if (highPriorityOnly.length > 0) {
+        const optimizedHighPriority = optimizeRouteOrder(departureLocation, highPriorityOnly, returnToDeparture);
+        combinations.push(optimizedHighPriority);
+      }
+    }
+    
+    // メンバーごとに均等に希望地を選ぶ候補を生成（複数バージョン）
+    const generateBalancedCombination = (maxLocationsPerMember: number) => {
+      const selectedLocations: DesiredLocation[] = [];
+      const memberSelectionCounts = new Map<string, number>();
+      members.forEach(m => memberSelectionCounts.set(m.id, 0));
+      
+      // 各メンバーから順番に希望地を選択
+      for (const { member, locations } of memberPriorityLocs) {
+        let count = 0;
+        for (const loc of locations) {
+          if (count >= maxLocationsPerMember) break;
+          if (!selectedLocations.includes(loc)) {
+            selectedLocations.push(loc);
+            count++;
+            const currentCount = memberSelectionCounts.get(member.id) || 0;
+            memberSelectionCounts.set(member.id, currentCount + 1);
+          }
         }
       }
-    }
+      
+      if (selectedLocations.length > 0) {
+        return optimizeRouteOrder(departureLocation, selectedLocations, returnToDeparture);
+      }
+      return null;
+    };
     
-    round++;
-    // 無限ループ防止: 10ラウンド以上は回さない
-    if (round >= 10) break;
-  }
-  
-  // 残りの日数で追加の希望地を選択 - リクエスト数が少ないメンバーの希望を優先
-  const sortedByRequestCount = [...memberPriorityLocs]
-    .sort((a, b) => {
-      const countA = memberLocationCounts.get(a.member.id) || 0;
-      const countB = memberLocationCounts.get(b.member.id) || 0;
-      return countA - countB; // リクエスト数が少ない順
-    });
-  
-  // リクエスト数が少ないメンバーから順に追加希望地を検討
-  for (const { member, locations } of sortedByRequestCount) {
-    for (const loc of locations) {
-      if (!selectedLocations.includes(loc) && totalHours + loc.stayDuration <= maxDays * 24) {
-        selectedLocations.push(loc);
-        totalHours += loc.stayDuration;
+    // メンバーごとに1〜3個の希望地を選ぶパターン
+    for (let i = 3; i >= 1; i--) {
+      const balancedCombo = generateBalancedCombination(i);
+      if (balancedCombo) {
+        combinations.push(balancedCombo);
       }
     }
+    
+    // 総滞在時間が利用可能時間に近い候補を生成
+    const generateOptimalTimeCombo = () => {
+      const selectedLocations: DesiredLocation[] = [];
+      let totalStayHours = 0;
+      
+      // 優先度順にソート
+      const sortedByPriority = [...desiredLocations].sort((a, b) => b.priority - a.priority);
+      
+      // メンバーごとに最低1つは選ぶ
+      for (const member of members) {
+        const topLoc = sortedByPriority.find(loc => 
+          loc.requesters.includes(member.id) && !selectedLocations.includes(loc)
+        );
+        
+        if (topLoc) {
+          selectedLocations.push(topLoc);
+          totalStayHours += topLoc.stayDuration;
+        }
+      }
+      
+      // 残りの時間で優先度順に追加
+      for (const loc of sortedByPriority) {
+        if (!selectedLocations.includes(loc) && totalStayHours + loc.stayDuration <= availableStayHours) {
+          selectedLocations.push(loc);
+          totalStayHours += loc.stayDuration;
+        }
+      }
+      
+      if (selectedLocations.length > 0) {
+        return optimizeRouteOrder(departureLocation, selectedLocations, returnToDeparture);
+      }
+      return null;
+    };
+    
+    const timeOptimalCombo = generateOptimalTimeCombo();
+    if (timeOptimalCombo) {
+      combinations.push(timeOptimalCombo);
+    }
   }
   
-  // 選択した場所の順序を最適化
-  const optimizedLocations = optimizeRouteOrder(departureLocation, selectedLocations, returnToDeparture);
+  // 重複を排除
+  const uniqueCombinations: DesiredLocation[][] = [];
+  const seen = new Set<string>();
   
-  // 最適化された順序の組み合わせを返す
-  return [optimizedLocations];
+  for (const combo of combinations) {
+    const key = combo.map(loc => loc.id).sort().join(',');
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueCombinations.push(combo);
+    }
+  }
+  
+  return uniqueCombinations;
 }
 
 /**
@@ -275,13 +355,12 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
       
       // 各区間の移動時間を計算し、区間ごとの移動手段を設定
       let currentPosition = prevLocation;
-      let accumulatedTravelDays = 0;
+      let accumulatedTravelHours = 0;
       
       // 出発地→出発空港、到着空港→目的地は陸路
       // 出発空港→到着空港は空路
       for (let i = 1; i < airportRoute.length; i++) {
         const nextPosition = airportRoute[i];
-        // 修正: より明確な条件で空港間の移動を判定
         // 現在地と次の地点の両方が空港名を含む場合のみ空路と判定
         const fromLocation = i > 0 ? airportRoute[i-1] : null;
         const toLocation = nextPosition;
@@ -301,14 +380,14 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
           segmentTransportType
         );
         
-        // 移動に必要な時間を加算（日単位に切り上げ）
-        const segmentTravelDays = Math.ceil(segmentTravelDuration / 24);
-        accumulatedTravelDays += segmentTravelDays;
+        // 移動時間を加算
+        accumulatedTravelHours += segmentTravelDuration;
         
         // 中間地点（空港）の場合
         if (i < airportRoute.length - 1) {
           // 中間地点（空港）を旅程に追加
-          const intermediateDate = new Date(currentDate.getTime() + segmentTravelDays * 24 * 60 * 60 * 1000);
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          const intermediateDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
           
           const intermediateLoc: ItineraryLocation = {
             id: uuidv4(),
@@ -332,12 +411,13 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
         } 
         // 最終地点（目的地）の場合
         else {
-          // 全移動日数を使って目的地の到着日を設定
-          currentDate = new Date(currentDate.getTime() + accumulatedTravelDays * 24 * 60 * 60 * 1000);
+          // 全移動時間を使って目的地の到着日を設定
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
           
           // 当該場所の滞在期間
           const arrivalDate = new Date(currentDate);
-          const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 24 * 60 * 60 * 1000);
+          const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 60 * 60 * 1000);
           
           // 旅程地点の作成
           const itineraryLoc: ItineraryLocation = {
@@ -373,13 +453,13 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
       // 移動時間を計算
       const travelDuration = estimateTransportDuration(prevLocation, desiredLoc.location, transportType);
       
-      // 移動に必要な時間を加算（日単位に切り上げ）
-      const travelDays = Math.ceil(travelDuration / 24);
-      currentDate = new Date(currentDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
+      // 移動時間を加算
+      const hoursSinceStart = Math.floor(travelDuration);
+      currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
       
       // 当該場所の滞在期間
       const arrivalDate = new Date(currentDate);
-      const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 24 * 60 * 60 * 1000);
+      const departureDate = new Date(currentDate.getTime() + desiredLoc.stayDuration * 60 * 60 * 1000);
       
       // 旅程地点の作成
       const itineraryLoc: ItineraryLocation = {
@@ -421,11 +501,10 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
       
       // 各区間の移動時間を計算し、区間ごとの移動手段を設定
       let currentPosition = lastLoc;
-      let accumulatedTravelDays = 0;
+      let accumulatedTravelHours = 0;
       
       for (let i = 1; i < airportRoute.length; i++) {
         const nextPosition = airportRoute[i];
-        // 修正: より明確な条件で空港間の移動を判定
         // 現在地と次の地点の両方が空港名を含む場合のみ空路と判定
         const fromLocation = i > 0 ? airportRoute[i-1] : null;
         const toLocation = nextPosition;
@@ -445,14 +524,14 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
           segmentTransportType
         );
         
-        // 移動に必要な時間を加算（日単位に切り上げ）
-        const segmentTravelDays = Math.ceil(segmentTravelDuration / 24);
-        accumulatedTravelDays += segmentTravelDays;
+        // 移動に必要な時間を加算
+        accumulatedTravelHours += segmentTravelDuration;
         
         // 中間地点（空港）の場合
         if (i < airportRoute.length - 1) {
           // 中間地点（空港）を旅程に追加
-          const intermediateDate = new Date(currentDate.getTime() + segmentTravelDays * 24 * 60 * 60 * 1000);
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          const intermediateDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
           
           const intermediateLoc: ItineraryLocation = {
             id: uuidv4(),
@@ -476,8 +555,9 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
         } 
         // 最終地点（出発地）の場合
         else {
-          // 全移動日数を使って目的地の到着日を設定
-          currentDate = new Date(currentDate.getTime() + accumulatedTravelDays * 24 * 60 * 60 * 1000);
+          // 全移動時間を使って目的地の到着日を設定
+          const hoursSinceStart = Math.floor(accumulatedTravelHours);
+          currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
           
           // 出発地に戻る
           const returnLoc: ItineraryLocation = {
@@ -508,9 +588,9 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
     // 陸路の場合は従来通りの直接移動
     else {
       const travelDuration = estimateTransportDuration(lastLoc, departureLocation, transportType);
-      const travelDays = Math.ceil(travelDuration / 24);
+      const hoursSinceStart = Math.floor(travelDuration);
       
-      currentDate = new Date(currentDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
+      currentDate = new Date(currentDate.getTime() + hoursSinceStart * 60 * 60 * 1000);
       
       const returnLoc: ItineraryLocation = {
         id: uuidv4(),
@@ -533,116 +613,15 @@ async function createItinerary(selectedLocations: DesiredLocation[], tripInfo: T
     }
   }
   
-  // 終了日が指定されている場合、旅程を調整して終了日に収まるようにする
-  if (tripInfo.endDate) {
+  // 終了日が指定されている場合、旅程が終了日を超えていないか確認
+  if (endDate) {
     const lastLocation = itineraryLocations[itineraryLocations.length - 1];
     const scheduledEndDate = lastLocation.arrivalDate;
     
-    // 旅程が終了日を超える場合
-    if (scheduledEndDate > tripInfo.endDate) {
-      console.log('旅程が終了日を超えています。滞在日数を調整します。');
-      
-      // 超過日数
-      const overDays = Math.ceil((scheduledEndDate.getTime() - tripInfo.endDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      // 場所ごとの滞在日数を比例配分で削減
-      const locationsTrimmed: ItineraryLocation[] = [];
-      const totalStayDays = selectedLocations.reduce((sum, loc) => sum + loc.stayDuration, 0);
-      let remainingDaysToTrim = overDays;
-      
-      // 前の場所の出発日を追跡（各移動の日数計算に必要）
-      let previousDepartureDate = new Date(startDate);
-      
-      // 最初の出発地点を追加
-      locationsTrimmed.push({
-        ...itineraryLocations[0],
-        arrivalDate: new Date(startDate),
-        departureDate: new Date(startDate)
-      });
-      
-      // 各場所の滞在日数を調整（空港を除く実際の訪問場所のみ）
-      for (let i = 1; i < itineraryLocations.length; i++) {
-        const currentLoc = itineraryLocations[i];
-        
-        // 空港は滞在日数を持たないので調整不要、ただし到着日と出発日を更新
-        if (
-          (currentLoc.location.name.includes('空港') || 
-           currentLoc.location.name.toLowerCase().includes('airport')) &&
-          currentLoc.arrivalDate.getTime() === currentLoc.departureDate.getTime()
-        ) {
-          // 前の場所からの移動日数を計算
-          const routeToAirport = routes.find(route => route.to === currentLoc.id);
-          const travelDays = routeToAirport ? Math.ceil(routeToAirport.estimatedDuration / 24) : 1;
-          
-          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
-          
-          locationsTrimmed.push({
-            ...currentLoc,
-            arrivalDate: newArrivalDate,
-            departureDate: newArrivalDate  // 空港での滞在はなし
-          });
-          
-          previousDepartureDate = newArrivalDate;
-          continue;
-        }
-        
-        // 滞在場所の場合は、滞在日数を調整
-        const originalStayDuration = currentLoc.departureDate.getTime() - currentLoc.arrivalDate.getTime();
-        const stayDays = Math.ceil(originalStayDuration / (1000 * 60 * 60 * 24));
-        
-        // この場所の滞在日数が1日以上なら調整可能
-        if (stayDays > 1) {
-          // 比例配分で削減日数を計算（少なくとも1日は滞在）
-          const proportionalShare = Math.min(
-            Math.floor(stayDays * (remainingDaysToTrim / totalStayDays)), 
-            stayDays - 1
-          );
-          
-          // 前の場所からの移動日数を計算
-          const routeToHere = routes.find(route => route.to === currentLoc.id);
-          const travelDays = routeToHere ? Math.ceil(routeToHere.estimatedDuration / 24) : 1;
-          
-          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
-          const newStayDays = Math.max(stayDays - proportionalShare, 1);
-          const newDepartureDate = new Date(newArrivalDate.getTime() + newStayDays * 24 * 60 * 60 * 1000);
-          
-          locationsTrimmed.push({
-            ...currentLoc,
-            arrivalDate: newArrivalDate,
-            departureDate: newDepartureDate
-          });
-          
-          previousDepartureDate = newDepartureDate;
-          remainingDaysToTrim -= proportionalShare;
-        } else {
-          // 滞在日数が1日以下なら調整不可、そのまま追加
-          const routeToHere = routes.find(route => route.to === currentLoc.id);
-          const travelDays = routeToHere ? Math.ceil(routeToHere.estimatedDuration / 24) : 1;
-          
-          const newArrivalDate = new Date(previousDepartureDate.getTime() + travelDays * 24 * 60 * 60 * 1000);
-          const newDepartureDate = new Date(newArrivalDate.getTime() + 24 * 60 * 60 * 1000); // 1日滞在
-          
-          locationsTrimmed.push({
-            ...currentLoc,
-            arrivalDate: newArrivalDate,
-            departureDate: newDepartureDate
-          });
-          
-          previousDepartureDate = newDepartureDate;
-        }
-      }
-      
-      // 調整後の最終日が終了日を超えていないか確認
-      const adjustedLastDate = locationsTrimmed[locationsTrimmed.length - 1].arrivalDate;
-      
-      if (adjustedLastDate <= tripInfo.endDate) {
-        // 調整に成功した場合、調整後の旅程を使用
-        itineraryLocations.splice(0, itineraryLocations.length, ...locationsTrimmed);
-      } else {
-        // 調整しても収まらない場合は、警告を出す
-        console.warn('滞在日数を調整しても旅程が終了日に収まりません。一部の目的地を削除する必要があります。');
-        // この場合は、generateLocationCombinations側でより少ない目的地を選択する必要がある
-      }
+    // 旅程が終了日を超える場合はエラー
+    if (scheduledEndDate > endDate) {
+      console.error('この組み合わせでは旅程が終了日を超えてしまいます。選択された希望地:', selectedLocations.length);
+      throw new Error('この組み合わせでは旅程が終了日を超えてしまいます。');
     }
   }
   
