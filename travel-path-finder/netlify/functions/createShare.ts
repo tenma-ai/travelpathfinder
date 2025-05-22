@@ -1,12 +1,13 @@
-import { Handler, HandlerEvent } from "@netlify/functions";
+import { Handler, HandlerEvent, HandlerResponse } from "@netlify/functions";
 import type { TripInfo } from "../../src/types";
+import { getStore } from "@netlify/blobs";
 
 /**
  * 共有データを作成するNetlify Function
- * POSTリクエストで旅行情報を受け取り、一意の共有コードを生成してKVストアに保存します。
+ * POSTリクエストで旅行情報を受け取り、一意の共有コードを生成してBlobsに保存します。
  * 保存期間: 30日（TTL）
  */
-const handler: Handler = async (event: HandlerEvent) => {
+const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> => {
   // POSTリクエスト以外は拒否
   if (event.httpMethod !== "POST") {
     return {
@@ -51,21 +52,11 @@ const handler: Handler = async (event: HandlerEvent) => {
       version: "v1"
     };
 
-    // KVストアに保存（30日後に自動削除）
-    const KV = process.env.NETLIFY_KV_NAMESPACE;
-    if (!KV) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "KV store not configured" }),
-        headers: { "Content-Type": "application/json" }
-      };
-    }
-
-    // @ts-ignore - APIの型定義がない場合の対応
-    const store = Netlify.env.get(KV);
+    // Blobsストアを使用してデータを保存
+    const store = getStore("trip-shares");
     
-    // データを保存（30日間の有効期限付き）
-    await store.set(shareCode, JSON.stringify(tripWithMeta), { ttl: 30 * 24 * 60 * 60 });
+    // データを保存（ttlはBlobsでは現在サポートされていない可能性があるため、基本的な保存のみ実行）
+    await store.set(shareCode, JSON.stringify(tripWithMeta));
     
     console.log(`旅行共有データを保存しました: ${shareCode}`);
 

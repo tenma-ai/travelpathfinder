@@ -1,11 +1,12 @@
-import { Handler, HandlerEvent } from "@netlify/functions";
+import { Handler, HandlerEvent, HandlerResponse } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
 
 /**
  * 共有データを取得するNetlify Function
- * GETリクエストで共有コードを受け取り、KVストアから該当データを返します。
+ * GETリクエストで共有コードを受け取り、Blobsストアから該当データを返します。
  * パス例: /api/getShare/ABC123
  */
-const handler: Handler = async (event: HandlerEvent) => {
+const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> => {
   // GETリクエスト以外は拒否
   if (event.httpMethod !== "GET") {
     return {
@@ -36,21 +37,8 @@ const handler: Handler = async (event: HandlerEvent) => {
 
     console.log(`共有コード「${shareCode}」の旅行データを取得します`);
 
-    // KVストアからデータを取得
-    const KV = process.env.NETLIFY_KV_NAMESPACE;
-    if (!KV) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "KV store not configured" }),
-        headers: { 
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        }
-      };
-    }
-
-    // @ts-ignore - APIの型定義がない場合の対応
-    const store = Netlify.env.get(KV);
+    // Blobsストアからデータを取得
+    const store = getStore("trip-shares");
     const storedData = await store.get(shareCode);
     
     if (!storedData) {
