@@ -4,6 +4,18 @@ import type { TripInfo, SharedTripInfo, Participant } from '../types';
 // ローカルストレージのキー
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
 
+// --- 追加: Unicode 文字列を安全に Base64 エンコード / デコードするユーティリティ ---
+const base64EncodeUnicode = (str: string): string => {
+  // UTF-8 -> percent-encoding -> raw bytes -> Base64
+  return btoa(unescape(encodeURIComponent(str)));
+};
+
+const base64DecodeUnicode = (base64: string): string => {
+  // Base64 -> raw bytes -> percent-encoding -> UTF-8
+  return decodeURIComponent(escape(atob(base64)));
+};
+// -----------------------------------------------------------------
+
 /**
  * 旅行情報を共有する
  * @param tripInfo 共有する旅行情報
@@ -68,8 +80,9 @@ export const getTripInfoByShareCode = (shareCode: string): TripInfo | null => {
 
     // ---------- 追加: Base64 エンコードされた共有データのデコード ----------
     try {
-      const decoded = atob(decodeURIComponent(shareCode));
-      const parsed: TripInfo = JSON.parse(decoded, dateReviver);
+      const base64 = decodeURIComponent(shareCode);
+      const jsonStr = base64DecodeUnicode(base64);
+      const parsed: TripInfo = JSON.parse(jsonStr, dateReviver);
       console.log('Base64 デコード成功', parsed);
       return parsed;
     } catch (e) {
@@ -165,7 +178,7 @@ export const addDesiredLocation = (shareCode: string, desiredLocation: any): boo
  */
 export const generatePortableShareCode = (tripInfo: TripInfo): string => {
   const json = JSON.stringify(tripInfo);
-  return encodeURIComponent(btoa(json));
+  return encodeURIComponent(base64EncodeUnicode(json));
 };
 
 /**
