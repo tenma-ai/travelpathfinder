@@ -86,6 +86,7 @@ const SoloTripPage = () => {
   
   // ホームに戻る
   const handleBackToHome = () => {
+    try { localStorage.removeItem(STORAGE_KEY);} catch {}
     navigate('/');
   };
   
