@@ -15,14 +15,15 @@ interface ResultViewProps {
  * 旅程結果表示コンポーネント
  */
 const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
-  const { members, generatedItinerary } = tripInfo;
+  const { generatedItinerary } = tripInfo;
+  const members = tripInfo.members; // メンバー情報を取得
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [copyMessage, setCopyMessage] = useState<string | null>(null);
-  const [shareError, setShareError] = useState<string | null>(null);
   const [shareMethod, setShareMethod] = useState<'code' | 'url'>('code');
+  const [copyMessage, setCopyMessage] = useState<string>('');
   const [isSharing, setIsSharing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   
   if (!generatedItinerary) {
     return (
@@ -271,7 +272,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                       className={`py-2 px-4 ${shareMethod === 'url' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
                       onClick={() => setShareMethod('url')}
                     >
-                      プランURL
+                      共有URL
                     </button>
                   </div>
                   
@@ -298,7 +299,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                   
                   {shareMethod === 'url' && (
                     <>
-                      <p className="text-sm font-medium text-black mb-1">旅行プランページURL:</p>
+                      <p className="text-sm font-medium text-black mb-1">共有URL:</p>
                       <div className="flex">
                         <input
                           type="text"
@@ -313,7 +314,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                           コピー
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">※ このURLで旅行プランを直接共有できます。リアルタイムで更新も同期されます</p>
+                      <p className="text-xs text-gray-500 mt-1">※ URLを受け取った人はリンクをクリックするだけで参加できます</p>
                     </>
                   )}
                 </div>

@@ -46,7 +46,7 @@ const generateShortCode = (input: string): string => {
 /**
  * 旅行情報を共有する（サーバーレスAPI版）
  * @param tripInfo 共有する旅行情報
- * @returns {Promise<string>} 共有URL（サイト内のsharedページのURL）
+ * @returns {Promise<string>} 共有コード
  */
 export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
   try {
@@ -101,9 +101,7 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
           
           // サーバー共有に失敗してもローカル共有は成功
           console.warn('サーバー共有は失敗しましたが、ローカル共有で継続します');
-          // 現在のサイトのsharedページURLを返す
-          const currentDomain = window.location.origin;
-          return `${currentDomain}/shared/${shareCode}`;
+          return shareCode;
         }
         
         serverResponse = await response.json();
@@ -118,9 +116,7 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
         
         // 最終的にサーバー共有に失敗してもローカル共有を返す
         console.warn('すべてのサーバー試行が失敗しましたが、ローカル共有で継続します');
-        // 現在のサイトのsharedページURLを返す
-        const currentDomain = window.location.origin;
-        return `${currentDomain}/shared/${shareCode}`;
+        return shareCode;
       }
     }
     
@@ -153,15 +149,11 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
       sharedTrips[shareCode] = redirectInfo;
       saveSharedTrips(sharedTrips);
       
-      // 現在のサイトのsharedページURLを返す
-      const currentDomain = window.location.origin;
-      return `${currentDomain}/shared/${serverResponse.shareCode}`;
+      return serverResponse.shareCode;
     }
     
-    // 現在のサイトのsharedページURLを返す
-    const finalShareCode = (serverResponse && serverResponse.shareCode) || shareCode;
-    const currentDomain = window.location.origin;
-    return `${currentDomain}/shared/${finalShareCode}`;
+    // サーバーが返した共有コードまたは最初に生成した共有コードを使用
+    return (serverResponse && serverResponse.shareCode) || shareCode;
   } catch (error) {
     console.error('サーバーレス共有処理中にエラーが発生しました:', error);
     // サーバー共有に失敗した場合、ローカル共有にフォールバック
@@ -173,7 +165,7 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
 /**
  * 旅行情報を共有する（ローカルストレージ版 - 従来方式）
  * @param tripInfo 共有する旅行情報
- * @returns 共有URL（サイト内のsharedページのURL）
+ * @returns 共有コード
  */
 export const shareTripInfo = (tripInfo: TripInfo): string => {
   try {
@@ -187,9 +179,7 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
     storeTripInfoLocally(shareCode, tripInfo);
     
     console.log(`共有コード生成成功: ${shareCode}`);
-    // 現在のサイトのsharedページURLを返す
-    const currentDomain = window.location.origin;
-    return `${currentDomain}/shared/${shareCode}`;
+    return shareCode;
   } catch (error) {
     console.error('共有処理中にエラーが発生しました:', error);
     throw new Error(`共有処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);

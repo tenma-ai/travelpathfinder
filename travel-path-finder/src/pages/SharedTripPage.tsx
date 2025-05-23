@@ -23,8 +23,7 @@ const SharedTripPage = () => {
   const MAX_RETRIES = 3;
   // タイマーIDを保持するためのref
   const retryTimerRef = useRef<number | null>(null);
-  // ポーリング停止関数を保持するためのref
-  const pollingStopRef = useRef<(() => void) | null>(null);
+  const stopPollingRef = useRef<(() => void) | null>(null);
 
   // コンポーネントのクリーンアップ関数
   useEffect(() => {
@@ -34,12 +33,33 @@ const SharedTripPage = () => {
         clearTimeout(retryTimerRef.current);
       }
       // ポーリングも停止
-      if (pollingStopRef.current) {
-        pollingStopRef.current();
-        pollingStopRef.current = null;
+      if (stopPollingRef.current) {
+        stopPollingRef.current();
       }
     };
   }, []);
+
+  // ポーリング機能を開始
+  useEffect(() => {
+    if (tripInfo && shareCode && !loading && !error) {
+      console.log('リアルタイム更新のポーリングを開始します');
+      const stopPolling = startPolling(
+        shareCode,
+        (updatedTripInfo) => {
+          console.log('リアルタイム更新を受信しました');
+          setTripInfo(updatedTripInfo);
+        },
+        15000 // 15秒間隔
+      );
+      
+      stopPollingRef.current = stopPolling;
+      
+      return () => {
+        stopPolling();
+        stopPollingRef.current = null;
+      };
+    }
+  }, [tripInfo, shareCode, loading, error]);
 
   useEffect(() => {
     // 以前のタイマーがあればクリアする
@@ -146,25 +166,6 @@ const SharedTripPage = () => {
         
         setTripInfo(tripData);
         setLoading(false);
-        
-        // リアルタイム更新のためのポーリングを開始
-        if (shareCode) {
-          console.log('リアルタイム更新ポーリングを開始します');
-          // 既存のポーリングがあれば停止
-          if (pollingStopRef.current) {
-            pollingStopRef.current();
-          }
-          
-          // 新しいポーリングを開始
-          pollingStopRef.current = startPolling(
-            shareCode,
-            (updatedTripInfo) => {
-              console.log('リアルタイム更新を受信:', updatedTripInfo.lastUpdated);
-              setTripInfo(updatedTripInfo);
-            },
-            10000 // 10秒間隔
-          );
-        }
       } catch (error) {
         console.error('共有旅行情報の読み込み中にエラーが発生しました:', error);
         
