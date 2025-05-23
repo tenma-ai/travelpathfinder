@@ -59,15 +59,23 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     // 最終更新日時を設定
     const lastUpdated = new Date().toISOString();
     
+    // 安全な日付処理のヘルパー関数
+    const safeToISOString = (dateValue: any): string | null => {
+      if (!dateValue) return null;
+      if (typeof dateValue === 'string') return dateValue;
+      if (dateValue instanceof Date) return dateValue.toISOString();
+      try {
+        return new Date(dateValue).toISOString();
+      } catch {
+        return null;
+      }
+    };
+
     // 日付データを文字列に変換して確実にJSONシリアライズされるようにする
     const processedTripInfo = {
       ...tripInfo,
-      startDate: tripInfo.startDate ? 
-        (typeof tripInfo.startDate === 'string' ? tripInfo.startDate : new Date(tripInfo.startDate).toISOString()) 
-        : null,
-      endDate: tripInfo.endDate ? 
-        (typeof tripInfo.endDate === 'string' ? tripInfo.endDate : new Date(tripInfo.endDate).toISOString()) 
-        : null,
+      startDate: safeToISOString(tripInfo.startDate),
+      endDate: safeToISOString(tripInfo.endDate),
       shareCode,
       lastUpdated,
       version: "v1"
@@ -75,20 +83,12 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     
     // 念のため、generatedItineraryが存在する場合に中の日付も全てシリアライズ
     if (processedTripInfo.generatedItinerary) {
-      // 日付情報を文字列に変換（タイプエラーを避けるため直接クローン作成）
+      // 日付情報を文字列に変換（安全な処理）
       const serializedLocations = processedTripInfo.generatedItinerary.locations.map(loc => {
         return {
           ...loc,
-          arrivalDate: loc.arrivalDate instanceof Date 
-            ? loc.arrivalDate.toISOString() 
-            : typeof loc.arrivalDate === 'string'
-              ? loc.arrivalDate
-              : new Date(loc.arrivalDate).toISOString(),
-          departureDate: loc.departureDate instanceof Date 
-            ? loc.departureDate.toISOString() 
-            : typeof loc.departureDate === 'string'
-              ? loc.departureDate
-              : new Date(loc.departureDate).toISOString()
+          arrivalDate: safeToISOString(loc.arrivalDate),
+          departureDate: safeToISOString(loc.departureDate)
         };
       });
       
