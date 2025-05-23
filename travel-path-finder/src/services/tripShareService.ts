@@ -7,7 +7,7 @@ import type { TripInfo, SharedTripInfo, Participant } from '../types';
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
 
 // APIエンドポイント
-const API_BASE_URL = '/api';
+const API_BASE_URL = '/.netlify/functions';
 
 // --- Base64エンコード/デコードユーティリティ ---
 // 互換性のために残すが、新しい共有では使わない
