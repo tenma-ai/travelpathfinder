@@ -50,7 +50,20 @@ const generateShortCode = (input: string): string => {
  */
 export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
   try {
-    console.log('サーバーレス共有処理開始', { tripName: tripInfo.name });
+    console.log('共有処理開始（暫定：ローカルストレージ版）', { tripName: tripInfo.name });
+    
+    // 暫定対応：Netlify Blobs未設定のため、ローカル共有のみを使用
+    console.warn('Netlify Blobs未設定のため、ローカル共有を使用します');
+    const shareCode = shareTripInfo(tripInfo);
+    
+    // デバッグ情報の追加
+    console.log(`ローカル共有完了: ${shareCode}`);
+    console.warn('注意: この共有は同じブラウザ内でのみ動作します。異なるデバイス間での共有にはNetlify Blobsの設定が必要です。');
+    
+    return shareCode;
+    
+    /* 
+    // Netlify Blobs設定後に以下を有効化
     
     // 共有コードを生成（固定8文字長でUUIDベース）
     const shareCode = generateShortCode(tripInfo.id + tripInfo.name);
@@ -154,9 +167,10 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
     
     // サーバーが返した共有コードまたは最初に生成した共有コードを使用
     return (serverResponse && serverResponse.shareCode) || shareCode;
+    */
   } catch (error) {
-    console.error('サーバーレス共有処理中にエラーが発生しました:', error);
-    // サーバー共有に失敗した場合、ローカル共有にフォールバック
+    console.error('共有処理中にエラーが発生しました:', error);
+    // ローカル共有にフォールバック
     console.log('ローカル共有にフォールバックします...');
     return shareTripInfo(tripInfo);
   }
