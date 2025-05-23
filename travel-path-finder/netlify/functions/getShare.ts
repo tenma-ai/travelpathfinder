@@ -41,7 +41,11 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     console.log(`共有コード「${shareCode}」の旅行データを取得します`);
 
     // Netlify Blobsストアからデータを取得
-    const store = getStore("trip-shares");
+    const store = getStore({
+      name: "trip-shares",
+      siteID: process.env.NETLIFY_SITE_ID,
+      token: process.env.NETLIFY_API_TOKEN
+    });
     
     // リトライ機構を設ける
     let attempts = 0;

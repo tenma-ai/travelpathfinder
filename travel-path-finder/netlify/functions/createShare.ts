@@ -103,7 +103,11 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     }
 
     // Blobsストアを使用してデータを保存
-    const store = getStore("trip-shares");
+    const store = getStore({
+      name: "trip-shares",
+      siteID: process.env.NETLIFY_SITE_ID,
+      token: process.env.NETLIFY_API_TOKEN
+    });
     
     // JSON文字列化して保存
     const jsonData = JSON.stringify(processedTripInfo);
