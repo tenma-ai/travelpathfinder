@@ -129,6 +129,55 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
         </p>
       </div>
       
+      {/* 希望地の採用状況 */}
+      {tripInfo.desiredLocations.length > 0 && (
+        <div className="p-4 border-b bg-gray-50">
+          <h3 className="text-lg font-bold mb-3 text-black">希望地の採用状況</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 採用された希望地 */}
+            <div>
+              <h4 className="font-semibold text-green-700 mb-2">✅ 採用された希望地 ({tripInfo.adoptedLocationIds?.length || 0}箇所)</h4>
+              <div className="space-y-2">
+                {tripInfo.desiredLocations
+                  .filter(loc => tripInfo.adoptedLocationIds?.includes(loc.id))
+                  .map(loc => (
+                    <div key={loc.id} className="bg-green-50 border border-green-200 rounded p-2">
+                      <div className="font-medium text-green-800">{loc.location.name}</div>
+                      <div className="text-sm text-green-600">
+                        希望者: {loc.requesters.map(id => 
+                          members.find(m => m.id === id)?.name || id
+                        ).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+            
+            {/* 採用されなかった希望地 */}
+            <div>
+              <h4 className="font-semibold text-red-700 mb-2">❌ 採用されなかった希望地 ({tripInfo.desiredLocations.length - (tripInfo.adoptedLocationIds?.length || 0)}箇所)</h4>
+              <div className="space-y-2">
+                {tripInfo.desiredLocations
+                  .filter(loc => !tripInfo.adoptedLocationIds?.includes(loc.id))
+                  .map(loc => (
+                    <div key={loc.id} className="bg-red-50 border border-red-200 rounded p-2">
+                      <div className="font-medium text-red-800">{loc.location.name}</div>
+                      <div className="text-sm text-red-600">
+                        希望者: {loc.requesters.map(id => 
+                          members.find(m => m.id === id)?.name || id
+                        ).join(', ')} • 優先度: {loc.priority}
+                      </div>
+                    </div>
+                  ))}
+                {tripInfo.desiredLocations.length - (tripInfo.adoptedLocationIds?.length || 0) === 0 && (
+                  <div className="text-gray-500 italic">すべての希望地が採用されました！</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* コンテンツセクション - 縦に並べる */}
       <div className="flex flex-col space-y-6 p-4">
         {/* マップビュー */}
@@ -222,7 +271,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                       className={`py-2 px-4 ${shareMethod === 'url' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
                       onClick={() => setShareMethod('url')}
                     >
-                      共有URL
+                      プランURL
                     </button>
                   </div>
                   
@@ -249,7 +298,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                   
                   {shareMethod === 'url' && (
                     <>
-                      <p className="text-sm font-medium text-black mb-1">共有URL:</p>
+                      <p className="text-sm font-medium text-black mb-1">旅行プランページURL:</p>
                       <div className="flex">
                         <input
                           type="text"
@@ -264,7 +313,7 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                           コピー
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">※ URLを受け取った人はリンクをクリックするだけで参加できます</p>
+                      <p className="text-xs text-gray-500 mt-1">※ このURLで旅行プランを直接共有できます。リアルタイムで更新も同期されます</p>
                     </>
                   )}
                 </div>

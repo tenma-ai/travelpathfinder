@@ -64,6 +64,7 @@ export interface TripInfo {
   endDate?: Date; // 自動計算の場合はundefined
   returnToDeparture: boolean;
   desiredLocations: DesiredLocation[];
+  adoptedLocationIds?: string[]; // 採用された希望地ID（旅程に含まれた希望地）
   generatedItinerary?: Itinerary;
   tripType: 'solo' | 'group' | 'join';
   shareCode?: string; // 共有コード - 共有時に自動生成

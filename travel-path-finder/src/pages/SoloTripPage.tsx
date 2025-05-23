@@ -42,9 +42,24 @@ const SoloTripPage = () => {
       // 最適ルートをフロントエンドで計算
       const itinerary = await generateOptimalRoute(formData);
       
+      // 採用された希望地IDを抽出
+      const adoptedLocationIds = itinerary.locations
+        .filter(loc => loc.originalRequesters.length > 0) // 希望地のみ（出発地/帰着地は除く）
+        .map(loc => {
+          // ItineraryLocationから対応するDesiredLocationのIDを見つける
+          const matchingDesiredLocation = formData.desiredLocations.find(desired =>
+            desired.location.name === loc.location.name &&
+            desired.location.coordinates[0] === loc.location.coordinates[0] &&
+            desired.location.coordinates[1] === loc.location.coordinates[1]
+          );
+          return matchingDesiredLocation?.id;
+        })
+        .filter(id => id !== undefined) as string[];
+      
       const updatedTripInfo = {
         ...formData,
-        generatedItinerary: itinerary
+        generatedItinerary: itinerary,
+        adoptedLocationIds
       };
       
       setTripInfo(updatedTripInfo);

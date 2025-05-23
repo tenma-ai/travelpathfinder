@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getTripInfoByShareCode } from '../services/tripShareService';
+import { getTripInfoByShareCode, startPolling } from '../services/tripShareService';
 import type { TripInfo } from '../types';
 import ResultView from '../components/trip/ResultView';
 import SoloTripForm from '../components/trip/SoloTripForm';
@@ -23,6 +23,8 @@ const SharedTripPage = () => {
   const MAX_RETRIES = 3;
   // タイマーIDを保持するためのref
   const retryTimerRef = useRef<number | null>(null);
+  // ポーリング停止関数を保持するためのref
+  const pollingStopRef = useRef<(() => void) | null>(null);
 
   // コンポーネントのクリーンアップ関数
   useEffect(() => {
@@ -30,6 +32,11 @@ const SharedTripPage = () => {
       // コンポーネントのアンマウント時にタイマーをクリア
       if (retryTimerRef.current !== null) {
         clearTimeout(retryTimerRef.current);
+      }
+      // ポーリングも停止
+      if (pollingStopRef.current) {
+        pollingStopRef.current();
+        pollingStopRef.current = null;
       }
     };
   }, []);
@@ -100,7 +107,23 @@ const SharedTripPage = () => {
             setRouteLoading(true);
             console.log('ルートが存在しないため、新しくルートを生成します');
             const optimizedRoute = await generateOptimalRoute(tripData);
+            
+            // 採用された希望地IDを抽出
+            const adoptedLocationIds = optimizedRoute.locations
+              .filter(loc => loc.originalRequesters.length > 0) // 希望地のみ（出発地/帰着地は除く）
+              .map(loc => {
+                // ItineraryLocationから対応するDesiredLocationのIDを見つける
+                const matchingDesiredLocation = tripData.desiredLocations.find(desired =>
+                  desired.location.name === loc.location.name &&
+                  desired.location.coordinates[0] === loc.location.coordinates[0] &&
+                  desired.location.coordinates[1] === loc.location.coordinates[1]
+                );
+                return matchingDesiredLocation?.id;
+              })
+              .filter(id => id !== undefined) as string[];
+            
             tripData.generatedItinerary = optimizedRoute;
+            tripData.adoptedLocationIds = adoptedLocationIds;
           } catch (routeError) {
             console.error('ルート生成中にエラーが発生しました:', routeError);
             // ルート生成に失敗してもTripInfoは表示できるようにする
@@ -123,6 +146,25 @@ const SharedTripPage = () => {
         
         setTripInfo(tripData);
         setLoading(false);
+        
+        // リアルタイム更新のためのポーリングを開始
+        if (shareCode) {
+          console.log('リアルタイム更新ポーリングを開始します');
+          // 既存のポーリングがあれば停止
+          if (pollingStopRef.current) {
+            pollingStopRef.current();
+          }
+          
+          // 新しいポーリングを開始
+          pollingStopRef.current = startPolling(
+            shareCode,
+            (updatedTripInfo) => {
+              console.log('リアルタイム更新を受信:', updatedTripInfo.lastUpdated);
+              setTripInfo(updatedTripInfo);
+            },
+            10000 // 10秒間隔
+          );
+        }
       } catch (error) {
         console.error('共有旅行情報の読み込み中にエラーが発生しました:', error);
         
@@ -173,10 +215,25 @@ const SharedTripPage = () => {
       // 最適ルートを再計算（非同期）
       const optimizedRoute = await generateOptimalRoute(updatedTripInfo);
       
+      // 採用された希望地IDを抽出
+      const adoptedLocationIds = optimizedRoute.locations
+        .filter(loc => loc.originalRequesters.length > 0) // 希望地のみ（出発地/帰着地は除く）
+        .map(loc => {
+          // ItineraryLocationから対応するDesiredLocationのIDを見つける
+          const matchingDesiredLocation = updatedTripInfo.desiredLocations.find(desired =>
+            desired.location.name === loc.location.name &&
+            desired.location.coordinates[0] === loc.location.coordinates[0] &&
+            desired.location.coordinates[1] === loc.location.coordinates[1]
+          );
+          return matchingDesiredLocation?.id;
+        })
+        .filter(id => id !== undefined) as string[];
+      
       // 旅行情報を更新
       setTripInfo({
         ...updatedTripInfo,
-        generatedItinerary: optimizedRoute
+        generatedItinerary: optimizedRoute,
+        adoptedLocationIds
       });
       
       // フォームを非表示

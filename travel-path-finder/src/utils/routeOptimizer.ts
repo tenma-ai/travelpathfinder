@@ -74,7 +74,9 @@ export async function generateOptimalRoute(tripInfo: TripInfo): Promise<Itinerar
   })));
   
   // 最適解を返す
-  return scoredCombinations[0].itinerary;
+  const bestItinerary = scoredCombinations[0].itinerary;
+  
+  return bestItinerary;
 }
 
 /**

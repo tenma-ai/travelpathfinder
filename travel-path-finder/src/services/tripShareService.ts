@@ -46,7 +46,7 @@ const generateShortCode = (input: string): string => {
 /**
  * 旅行情報を共有する（サーバーレスAPI版）
  * @param tripInfo 共有する旅行情報
- * @returns {Promise<string>} 共有コード
+ * @returns {Promise<string>} 共有URL（サイト内のsharedページのURL）
  */
 export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
   try {
@@ -101,7 +101,9 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
           
           // サーバー共有に失敗してもローカル共有は成功
           console.warn('サーバー共有は失敗しましたが、ローカル共有で継続します');
-          return shareCode;
+          // 現在のサイトのsharedページURLを返す
+          const currentDomain = window.location.origin;
+          return `${currentDomain}/shared/${shareCode}`;
         }
         
         serverResponse = await response.json();
@@ -116,7 +118,9 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
         
         // 最終的にサーバー共有に失敗してもローカル共有を返す
         console.warn('すべてのサーバー試行が失敗しましたが、ローカル共有で継続します');
-        return shareCode;
+        // 現在のサイトのsharedページURLを返す
+        const currentDomain = window.location.origin;
+        return `${currentDomain}/shared/${shareCode}`;
       }
     }
     
@@ -149,11 +153,15 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
       sharedTrips[shareCode] = redirectInfo;
       saveSharedTrips(sharedTrips);
       
-      return serverResponse.shareCode;
+      // 現在のサイトのsharedページURLを返す
+      const currentDomain = window.location.origin;
+      return `${currentDomain}/shared/${serverResponse.shareCode}`;
     }
     
-    // サーバーが返した共有コードまたは最初に生成した共有コードを使用
-    return (serverResponse && serverResponse.shareCode) || shareCode;
+    // 現在のサイトのsharedページURLを返す
+    const finalShareCode = (serverResponse && serverResponse.shareCode) || shareCode;
+    const currentDomain = window.location.origin;
+    return `${currentDomain}/shared/${finalShareCode}`;
   } catch (error) {
     console.error('サーバーレス共有処理中にエラーが発生しました:', error);
     // サーバー共有に失敗した場合、ローカル共有にフォールバック
@@ -165,7 +173,7 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
 /**
  * 旅行情報を共有する（ローカルストレージ版 - 従来方式）
  * @param tripInfo 共有する旅行情報
- * @returns 共有コード
+ * @returns 共有URL（サイト内のsharedページのURL）
  */
 export const shareTripInfo = (tripInfo: TripInfo): string => {
   try {
@@ -179,7 +187,9 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
     storeTripInfoLocally(shareCode, tripInfo);
     
     console.log(`共有コード生成成功: ${shareCode}`);
-    return shareCode;
+    // 現在のサイトのsharedページURLを返す
+    const currentDomain = window.location.origin;
+    return `${currentDomain}/shared/${shareCode}`;
   } catch (error) {
     console.error('共有処理中にエラーが発生しました:', error);
     throw new Error(`共有処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
@@ -464,12 +474,40 @@ function restoreTripDates(data: any): TripInfo {
 }
 
 /**
+ * サーバーにTripInfoを同期する
+ * @param shareCode 共有コード
+ * @param tripInfo 旅行情報
+ */
+async function syncToServer(shareCode: string, tripInfo: TripInfo): Promise<void> {
+  const serverUrl = `/.netlify/functions/createShare`;
+  
+  const response = await fetch(serverUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ...tripInfo,
+      shareCode, // 明示的に共有コードを含める
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`サーバー同期エラー: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  console.log('サーバー同期成功:', result);
+}
+
+/**
  * 旅行に参加
  * @param shareCode 共有コード
  * @param participant 参加者情報
  * @returns 成功したかどうか
  */
-export const joinTrip = (shareCode: string, participant: Participant): boolean => {
+export const joinTrip = async (shareCode: string, participant: Participant): Promise<boolean> => {
   try {
     const sharedTrips = getSharedTrips();
     
@@ -494,8 +532,16 @@ export const joinTrip = (shareCode: string, participant: Participant): boolean =
       sharedTrips[shareCode].lastUpdated = new Date();
       sharedTrips[shareCode].tripInfo.lastUpdated = new Date();
       
-      // 保存
+      // ローカルストレージに保存
       saveSharedTrips(sharedTrips);
+      
+      // サーバーにも同期
+      try {
+        await syncToServer(shareCode, sharedTrips[shareCode].tripInfo);
+        console.log('メンバー参加をサーバーに同期しました');
+      } catch (syncError) {
+        console.warn('サーバー同期に失敗しましたが、ローカルには保存されました:', syncError);
+      }
     }
     
     return true;
@@ -511,7 +557,7 @@ export const joinTrip = (shareCode: string, participant: Participant): boolean =
  * @param desiredLocation 希望地情報
  * @returns 成功したかどうか
  */
-export const addDesiredLocation = (shareCode: string, desiredLocation: any): boolean => {
+export const addDesiredLocation = async (shareCode: string, desiredLocation: any): Promise<boolean> => {
   try {
     const sharedTrips = getSharedTrips();
     
@@ -526,8 +572,16 @@ export const addDesiredLocation = (shareCode: string, desiredLocation: any): boo
     sharedTrips[shareCode].lastUpdated = new Date();
     sharedTrips[shareCode].tripInfo.lastUpdated = new Date();
     
-    // 保存
+    // ローカルストレージに保存
     saveSharedTrips(sharedTrips);
+    
+    // サーバーにも同期
+    try {
+      await syncToServer(shareCode, sharedTrips[shareCode].tripInfo);
+      console.log('希望地追加をサーバーに同期しました');
+    } catch (syncError) {
+      console.warn('サーバー同期に失敗しましたが、ローカルには保存されました:', syncError);
+    }
     
     return true;
   } catch (error) {
@@ -589,4 +643,48 @@ const dateReviver = (key: string, value: any): any => {
   }
   
   return value;
+};
+
+/**
+ * リアルタイム更新のためのポーリング機能
+ * @param shareCode 共有コード
+ * @param onUpdate 更新時のコールバック
+ * @param intervalMs ポーリング間隔（ミリ秒）
+ * @returns ポーリング停止関数
+ */
+export const startPolling = (
+  shareCode: string, 
+  onUpdate: (tripInfo: TripInfo) => void, 
+  intervalMs: number = 10000 // 10秒間隔
+): (() => void) => {
+  let lastVersion = '';
+  
+  const poll = async () => {
+    try {
+      const updatedTripInfo = await getTripInfoByShareCode(shareCode);
+      if (updatedTripInfo) {
+        // バージョン情報で変更を検知（lastUpdatedを使用）
+        const currentVersion = updatedTripInfo.lastUpdated?.toISOString() || '';
+        if (currentVersion !== lastVersion) {
+          lastVersion = currentVersion;
+          onUpdate(updatedTripInfo);
+          console.log('リアルタイム更新を検知しました:', currentVersion);
+        }
+      }
+    } catch (error) {
+      console.warn('ポーリング中にエラーが発生しました:', error);
+    }
+  };
+  
+  // 初回実行
+  poll();
+  
+  // 定期実行
+  const intervalId = setInterval(poll, intervalMs);
+  
+  // 停止関数を返す
+  return () => {
+    clearInterval(intervalId);
+    console.log('ポーリングを停止しました');
+  };
 }; 
