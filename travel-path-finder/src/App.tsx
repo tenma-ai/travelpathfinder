@@ -13,6 +13,7 @@ function App() {
         <Route path="/solo-trip" element={<SoloTripPage />} />
         <Route path="/group-trip" element={<GroupTripPage />} />
         <Route path="/shared/:shareCode" element={<SharedTripPage />} />
+        <Route path="/join-trip/:shareCode" element={<SharedTripPage />} />
       </Routes>
     </Router>
   );
