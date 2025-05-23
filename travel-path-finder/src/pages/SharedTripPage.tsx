@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getTripInfoByShareCode } from '../services/tripShareService';
 import type { TripInfo } from '../types';
@@ -21,8 +21,26 @@ const SharedTripPage = () => {
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 3;
+  // タイマーIDを保持するためのref
+  const retryTimerRef = useRef<number | null>(null);
+
+  // コンポーネントのクリーンアップ関数
+  useEffect(() => {
+    return () => {
+      // コンポーネントのアンマウント時にタイマーをクリア
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
+    // 以前のタイマーがあればクリアする
+    if (retryTimerRef.current !== null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+
     const loadSharedTrip = async () => {
       if (!shareCode) {
         setError('共有コードが見つかりません');
@@ -47,19 +65,21 @@ const SharedTripPage = () => {
           console.error('共有データが見つかりません');
           
           // 最大リトライ回数に達していない場合は再試行
-          if (retryCount < MAX_RETRIES) {
+          if (retryCount < MAX_RETRIES - 1) { // 0-indexedなので-1する
             console.log(`再試行します (${retryCount + 1}/${MAX_RETRIES})...`);
             setRetryCount(prev => prev + 1);
-            // 500ms後に再試行
-            setTimeout(() => {
-              loadSharedTrip();
-            }, 500 * (retryCount + 1)); // 徐々に間隔を広げる
+            // 次のレンダリングサイクルで再試行が実行される
             return;
           }
           
           setError('指定された共有コードの旅行情報が見つかりませんでした');
           setLoading(false);
-          setDebugInfo(prev => ({ ...prev, error: 'データなし', endTime: new Date().toISOString() }));
+          setDebugInfo(prev => ({ 
+            ...prev, 
+            error: 'データなし', 
+            endTime: new Date().toISOString(),
+            finalRetryCount: retryCount + 1
+          }));
           return;
         }
         
@@ -97,7 +117,8 @@ const SharedTripPage = () => {
           tripId: tripData.id,
           locationsCount: tripData.desiredLocations?.length || 0,
           hasRoute: !!tripData.generatedItinerary,
-          endTime: new Date().toISOString()
+          endTime: new Date().toISOString(),
+          finalRetryCount: retryCount + 1
         }));
         
         setTripInfo(tripData);
@@ -106,13 +127,10 @@ const SharedTripPage = () => {
         console.error('共有旅行情報の読み込み中にエラーが発生しました:', error);
         
         // 最大リトライ回数に達していない場合は再試行
-        if (retryCount < MAX_RETRIES) {
+        if (retryCount < MAX_RETRIES - 1) { // 0-indexedなので-1する
           console.log(`エラーが発生したため再試行します (${retryCount + 1}/${MAX_RETRIES})...`);
           setRetryCount(prev => prev + 1);
-          // 500ms後に再試行 (リトライごとに待機時間を増やす)
-          setTimeout(() => {
-            loadSharedTrip();
-          }, 500 * (retryCount + 1));
+          // 次のレンダリングサイクルで再試行が実行される
           return;
         }
         
@@ -123,13 +141,14 @@ const SharedTripPage = () => {
         setDebugInfo(prev => ({
           ...prev,
           error: error instanceof Error ? error.message : '不明なエラー',
-          endTime: new Date().toISOString()
+          endTime: new Date().toISOString(),
+          finalRetryCount: retryCount + 1
         }));
       }
     };
 
     loadSharedTrip();
-  }, [shareCode]);
+  }, [shareCode, retryCount]); // retryCountを依存配列に追加
 
   /**
    * ホームに戻る
@@ -176,11 +195,7 @@ const SharedTripPage = () => {
   const handleRetry = () => {
     setError(null);
     setLoading(true);
-    setRetryCount(0);
-    // 共有コードを使って再度読み込み
-    if (shareCode) {
-      navigate(`/shared/${shareCode}`, { replace: true });
-    }
+    setRetryCount(0); // カウンターをリセット
   };
 
   if (loading) {
@@ -191,7 +206,7 @@ const SharedTripPage = () => {
           <h2 className="text-xl mb-4">共有された旅行情報を読み込み中...</h2>
           <p className="text-gray-600">少々お待ちください</p>
           {retryCount > 0 && (
-            <p className="text-gray-500 mt-2">再試行中 ({retryCount}/{MAX_RETRIES})</p>
+            <p className="text-gray-500 mt-2">再試行中 ({retryCount + 1}/{MAX_RETRIES})</p>
           )}
         </div>
       </div>

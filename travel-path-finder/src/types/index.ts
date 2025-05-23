@@ -78,6 +78,7 @@ export interface SharedTripInfo {
   createdAt: Date;
   lastUpdated: Date;
   version?: string; // バージョン情報（サーバー連携など）
+  redirectTo?: string; // リダイレクト先の共有コード（共有コードが変更された場合）
 }
 
 // 参加者情報

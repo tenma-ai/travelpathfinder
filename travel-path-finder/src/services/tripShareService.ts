@@ -32,24 +32,12 @@ const base64DecodeUnicode = (base64: string): string => {
  * @returns 短い識別コード
  */
 const generateShortCode = (input: string): string => {
-  // 簡易ハッシュ関数 (文字列に基づいた短いコードを生成)
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // 32bit整数に変換
-  }
+  // UUID v4の最初の8文字を使用することで衝突可能性を低減
+  const uuid = uuidv4();
+  const uuidPart = uuid.substr(0, 8).toUpperCase();
   
-  // タイムスタンプを追加して一意性を高める
-  const timestamp = Date.now().toString(36);
-  
-  // ランダムな文字を追加
-  const randomPart = Math.random().toString(36).substr(2, 4);
-  
-  // 8文字のコードを生成 (ハッシュ+タイムスタンプ+ランダム)
-  return (Math.abs(hash).toString(36).substr(0, 3) + 
-          timestamp.substr(-3) + 
-          randomPart.substr(0, 2)).toUpperCase();
+  // 固定長と予測不可能性を確保
+  return uuidPart;
 };
 
 /**
@@ -61,43 +49,103 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
   try {
     console.log('サーバーレス共有処理開始', { tripName: tripInfo.name });
     
+    // 共有コードを生成（固定8文字長でUUIDベース）
+    const shareCode = generateShortCode(tripInfo.id + tripInfo.name);
+    console.log(`生成された共有コード: ${shareCode}`);
+    
     // 日付関連フィールドをシリアライズするため、クローンして余分なデータを削除
-    const tripToShare = JSON.parse(JSON.stringify(tripInfo));
+    const tripToShare = JSON.parse(JSON.stringify({
+      ...tripInfo,
+      shareCode, // 必ず同じ共有コードにする
+      lastUpdated: new Date()
+    }));
     
     // ローカルストレージにも直接保存して冗長性を確保
-    const shareCode = generateShortCode(tripInfo.id + tripInfo.name + new Date().toISOString());
-    
-    // ローカルストレージに保存（サーバーに保存する前に）
-    storeTripInfoLocally(shareCode, tripInfo);
-    
-    // APIリクエスト
-    const response = await fetch(`${API_BASE_URL}/createShare`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(tripToShare),
+    storeTripInfoLocally(shareCode, {
+      ...tripInfo,
+      shareCode,
+      lastUpdated: new Date()
     });
     
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('サーバー共有エラー:', response.status, errorData);
-      throw new Error(`サーバー共有に失敗しました (${response.status}): ${errorData}`);
-    }
+    // リトライ機構を設ける
+    let attempts = 0;
+    const MAX_ATTEMPTS = 3;
+    let serverResponse = null;
     
-    const data = await response.json();
-    console.log('サーバー共有成功:', data);
+    while (attempts < MAX_ATTEMPTS && !serverResponse) {
+      attempts++;
+      try {
+        // APIリクエスト
+        console.log(`サーバーへの保存を試行中 (${attempts}/${MAX_ATTEMPTS})`);
+        const response = await fetch(`${API_BASE_URL}/createShare`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(tripToShare),
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.text();
+          console.error(`サーバー共有エラー (${attempts}/${MAX_ATTEMPTS}):`, response.status, errorData);
+          
+          if (attempts < MAX_ATTEMPTS) {
+            // 待機してから再試行
+            await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+            continue;
+          }
+          
+          throw new Error(`サーバー共有に失敗しました (${response.status}): ${errorData}`);
+        }
+        
+        serverResponse = await response.json();
+        console.log('サーバー共有成功:', serverResponse);
+      } catch (error) {
+        if (attempts < MAX_ATTEMPTS) {
+          console.warn(`サーバー共有エラー、再試行します (${attempts}/${MAX_ATTEMPTS})`, error);
+          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+          continue;
+        }
+        
+        console.error('すべての試行が失敗しました:', error);
+        throw error;
+      }
+    }
     
     // サーバーが返す共有コードをローカルへも保存（上書き）
-    if (data.shareCode && data.shareCode !== shareCode) {
-      storeTripInfoLocally(data.shareCode, {
+    // サーバーが正常に応答した場合
+    if (serverResponse && serverResponse.shareCode && serverResponse.shareCode !== shareCode) {
+      console.log(`サーバーが別の共有コードを返しました: ${serverResponse.shareCode} (元: ${shareCode})`);
+      
+      // 新しいコードで再保存
+      storeTripInfoLocally(serverResponse.shareCode, {
         ...tripInfo,
-        shareCode: data.shareCode
+        shareCode: serverResponse.shareCode,
+        lastUpdated: new Date()
       });
+      
+      // 元のコードも残しておく（リダイレクト用）
+      const redirectInfo: SharedTripInfo = {
+        shareCode: shareCode,
+        tripInfo: {
+          ...tripInfo,
+          shareCode: serverResponse.shareCode, // 実際のコードを参照
+          lastUpdated: new Date()
+        },
+        createdAt: new Date(),
+        lastUpdated: new Date(),
+        redirectTo: serverResponse.shareCode // リダイレクト先を示す
+      };
+      
+      const sharedTrips = getSharedTrips();
+      sharedTrips[shareCode] = redirectInfo;
+      saveSharedTrips(sharedTrips);
+      
+      return serverResponse.shareCode;
     }
     
-    // サーバーから返された共有コードを使用
-    return data.shareCode || shareCode;
+    // サーバーが返した共有コードまたは最初に生成した共有コードを使用
+    return (serverResponse && serverResponse.shareCode) || shareCode;
   } catch (error) {
     console.error('サーバーレス共有処理中にエラーが発生しました:', error);
     // サーバー共有に失敗した場合、ローカル共有にフォールバック
@@ -115,9 +163,9 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
   try {
     console.log('共有処理開始', { tripName: tripInfo.name });
     
-    // シンプルな共有コードを生成 (タイムスタンプやIDに基づく固有コード)
-    const baseCodeInfo = tripInfo.id + tripInfo.name + new Date().toISOString();
-    const shareCode = generateShortCode(baseCodeInfo);
+    // 固定長の共有コードを生成
+    const shareCode = generateShortCode(tripInfo.id + tripInfo.name);
+    console.log(`生成された共有コード: ${shareCode}`);
     
     // 保存処理を共通関数へ
     storeTripInfoLocally(shareCode, tripInfo);
@@ -168,65 +216,107 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
   try {
     console.log(`共有コード検索開始: ${shareCode}`);
     
-    // 1. サーバーAPIから取得を試みる（新方式）
-    try {
-      console.log(`サーバーAPIから取得を試みています: ${shareCode}`);
-      const response = await fetch(`${API_BASE_URL}/getShare/${shareCode}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('サーバーから旅行情報を取得しました', data);
+    // 0. まずローカルストレージを確認（リダイレクト情報もチェック）
+    const sharedTrips = getSharedTrips();
+    const localData = sharedTrips[shareCode];
+    
+    if (localData) {
+      // リダイレクト情報がある場合は、リダイレクト先のデータを使用
+      if (localData.redirectTo && sharedTrips[localData.redirectTo]) {
+        console.log(`リダイレクト先データを使用: ${localData.redirectTo}`);
+        const redirectData = sharedTrips[localData.redirectTo];
         
-        // デバッグ情報ログ
-        console.log(`サーバーから取得したデータ構造: 
-          id=${data.id}, 
-          name=${data.name}, 
-          shareCode=${data.shareCode}, 
-          場所数=${data.desiredLocations?.length || 0}, 
-          generatedItinerary=${data.generatedItinerary ? '存在' : 'なし'}`
-        );
-        
-        // 日付の復元
-        const tripData = restoreTripDates(data);
-        
-        // ローカルにも保存
-        const sharedTrips = getSharedTrips();
-        sharedTrips[shareCode] = {
-          shareCode,
-          tripInfo: tripData,
-          createdAt: new Date(),
-          lastUpdated: new Date(),
-          version: 'v1-server'
-        };
-        saveSharedTrips(sharedTrips);
-        
-        return tripData;
+        // リダイレクト先からJSONをクローン後、日付復元
+        const tripInfo = JSON.parse(JSON.stringify(redirectData.tripInfo), dateReviver);
+        return tripInfo;
       }
       
-      // 404の場合は続行
-      if (response.status !== 404) {
-        console.error(`サーバーからの取得に失敗: ${response.status}`);
+      console.log(`ローカルストレージで共有コード発見: ${shareCode}`);
+      // 日付のリハイドレーション
+      const tripInfo = JSON.parse(JSON.stringify(localData.tripInfo), dateReviver);
+      console.log('ローカルから旅行情報を取得・復元しました', tripInfo);
+      
+      // 先にローカルデータを返し、バックグラウンドでサーバー更新を試みる
+      // サーバーからも最新データを取得（バックグラウンド更新）
+      fetchFromServerAndUpdateLocal(shareCode).catch(e => 
+        console.warn('バックグラウンド同期エラー:', e)
+      );
+      
+      return tripInfo;
+    }
+    
+    // 1. サーバーAPIから取得を試みる
+    try {
+      console.log(`サーバーAPIから取得を試みています: ${shareCode}`);
+      
+      // リトライ機構の導入
+      let attempts = 0;
+      const MAX_ATTEMPTS = 3;
+      
+      while (attempts < MAX_ATTEMPTS) {
+        attempts++;
+        try {
+          console.log(`サーバーからの取得を試行中 (${attempts}/${MAX_ATTEMPTS})`);
+          
+          const response = await fetch(`${API_BASE_URL}/getShare/${shareCode}`);
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('サーバーから旅行情報を取得しました', data);
+            
+            // デバッグ情報ログ
+            console.log(`サーバーから取得したデータ構造: 
+              id=${data.id}, 
+              name=${data.name}, 
+              shareCode=${data.shareCode}, 
+              場所数=${data.desiredLocations?.length || 0}, 
+              generatedItinerary=${data.generatedItinerary ? '存在' : 'なし'}`
+            );
+            
+            // 日付の復元
+            const tripData = restoreTripDates(data);
+            
+            // ローカルにも保存
+            const sharedTrips = getSharedTrips();
+            sharedTrips[shareCode] = {
+              shareCode,
+              tripInfo: tripData,
+              createdAt: new Date(),
+              lastUpdated: new Date(),
+              version: 'v1-server'
+            };
+            saveSharedTrips(sharedTrips);
+            
+            return tripData;
+          }
+          
+          // 404の場合は次のステップへ
+          if (response.status === 404) {
+            console.log(`サーバーにデータがありません (${attempts}/${MAX_ATTEMPTS}):`);
+            break; // 404ならリトライしない
+          }
+          
+          // その他のエラーでリトライ
+          console.warn(`サーバーからの取得に失敗 (${attempts}/${MAX_ATTEMPTS}): ${response.status}`);
+          
+          if (attempts < MAX_ATTEMPTS) {
+            // 再試行前に待機
+            await new Promise(resolve => setTimeout(resolve, 300 * attempts));
+          }
+        } catch (error) {
+          console.error(`サーバー接続エラー (${attempts}/${MAX_ATTEMPTS}):`, error);
+          
+          if (attempts < MAX_ATTEMPTS) {
+            // 再試行前に待機
+            await new Promise(resolve => setTimeout(resolve, 300 * attempts));
+          }
+        }
       }
     } catch (e) {
       console.error('サーバーからの取得中にエラー:', e);
     }
     
-    // 2. ローカルストレージから検索（旧方式）
-    const sharedTrips = getSharedTrips();
-    
-    if (sharedTrips[shareCode]) {
-      console.log(`ローカルストレージで共有コード発見: ${shareCode}`);
-      
-      // 日付のリハイドレーション
-      const tripInfo = JSON.parse(JSON.stringify(sharedTrips[shareCode].tripInfo), dateReviver);
-      
-      console.log('旅行情報を正常に取得・復元しました', tripInfo);
-      return tripInfo;
-    }
-    
-    // 直接リンク関連のコードを削除（これらのブロックは削除）
-    
-    // 4. 古い形式のBase64エンコードされたデータとして試行（互換性のために残すが、新しい共有では使わない）
+    // 古い形式のBase64エンコードデータの処理（レガシー互換性のため残す）
     try {
       // 長さが妥当なBase64エンコードっぽい文字列の場合のみ試行
       if (shareCode.length > 50) {
@@ -246,7 +336,7 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
         const tripData = restoreTripDates(parsed);
         
         // 新しい形式に保存
-        const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
+        const newShareCode = generateShortCode(tripData.id + tripData.name);
         tripData.shareCode = newShareCode;
         
         // 保存
@@ -257,6 +347,7 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
           lastUpdated: new Date()
         };
         
+        const sharedTrips = getSharedTrips();
         sharedTrips[newShareCode] = sharedTripInfo;
         saveSharedTrips(sharedTrips);
         
@@ -272,9 +363,42 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
     return null;
   } catch (error) {
     console.error('共有旅行情報の取得中にエラーが発生しました:', error);
-    throw new Error(`共有旅行情報の取得に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    throw error;
   }
 };
+
+/**
+ * サーバーからデータを取得し、ローカルストレージを更新する（バックグラウンド処理）
+ */
+async function fetchFromServerAndUpdateLocal(shareCode: string): Promise<void> {
+  try {
+    console.log(`バックグラウンドでサーバーデータを同期中: ${shareCode}`);
+    const response = await fetch(`${API_BASE_URL}/getShare/${shareCode}`);
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('バックグラウンド同期: サーバーデータを取得');
+      
+      // 日付の復元
+      const tripData = restoreTripDates(data);
+      
+      // ローカルに上書き保存
+      const sharedTrips = getSharedTrips();
+      sharedTrips[shareCode] = {
+        shareCode,
+        tripInfo: tripData,
+        createdAt: new Date(),
+        lastUpdated: new Date(),
+        version: 'v1-server'
+      };
+      saveSharedTrips(sharedTrips);
+      
+      console.log('ローカルストレージをサーバーデータで更新しました');
+    }
+  } catch (error) {
+    console.warn('バックグラウンド同期失敗:', error);
+  }
+}
 
 /**
  * 日付文字列を含むTripInfoオブジェクトのすべての日付をDateオブジェクトに変換
