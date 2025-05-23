@@ -62,8 +62,12 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     // 日付データを文字列に変換して確実にJSONシリアライズされるようにする
     const processedTripInfo = {
       ...tripInfo,
-      startDate: tripInfo.startDate ? tripInfo.startDate.toISOString() : null,
-      endDate: tripInfo.endDate ? tripInfo.endDate.toISOString() : null,
+      startDate: tripInfo.startDate ? 
+        (typeof tripInfo.startDate === 'string' ? tripInfo.startDate : new Date(tripInfo.startDate).toISOString()) 
+        : null,
+      endDate: tripInfo.endDate ? 
+        (typeof tripInfo.endDate === 'string' ? tripInfo.endDate : new Date(tripInfo.endDate).toISOString()) 
+        : null,
       shareCode,
       lastUpdated,
       version: "v1"
