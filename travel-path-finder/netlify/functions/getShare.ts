@@ -50,26 +50,56 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     while (attempts < MAX_ATTEMPTS) {
       attempts++;
       try {
-        console.log(`データ取得試行中 (${attempts}/${MAX_ATTEMPTS})`);
+        console.log(`データ取得試行中 (${attempts}/${MAX_ATTEMPTS}): ${shareCode}`);
         const storedData = await store.get(shareCode);
         
         if (!storedData) {
-          console.log(`共有コード「${shareCode}」に対応するデータがありません`);
+          console.log(`共有コード「${shareCode}」に対応するデータがありません (試行: ${attempts}/${MAX_ATTEMPTS})`);
           
           // 最後の試行時だけエラーダイアグノスティックを実行
           if (attempts === MAX_ATTEMPTS) {
             try {
               const blobsList = await store.list();
-              console.log(`利用可能なBlobs: ${blobsList.blobs.length}件（最初の3件）`, 
-                blobsList.blobs.slice(0, 3).map(b => b.key));
+              console.log(`利用可能なBlobs: ${blobsList.blobs.length}件`, 
+                blobsList.blobs.map(b => ({ key: b.key })));
                 
               // 類似コード検索
+              const firstThreeChars = shareCode.substring(0, 3);
               const similarKeys = blobsList.blobs
                 .map(b => b.key)
-                .filter(key => key.includes(shareCode.substring(0, 3)));
+                .filter(key => key.includes(firstThreeChars));
                 
               if (similarKeys.length > 0) {
-                console.log(`類似コード (${similarKeys.length}件): ${similarKeys.slice(0, 3).join(', ')}${similarKeys.length > 3 ? '...' : ''}`);
+                console.log(`類似コード検索結果 (${firstThreeChars}): ${similarKeys.join(', ')}`);
+                
+                // 最も類似したコードの内容を取得
+                try {
+                  const similarData = await store.get(similarKeys[0]);
+                  if (similarData) {
+                    console.log(`類似コード「${similarKeys[0]}」のデータが存在します (${similarData.length}バイト)`);
+                    
+                    // レスポンスにデバッグ情報として追加
+                    return {
+                      statusCode: 404,
+                      body: JSON.stringify({ 
+                        error: "Share data not found",
+                        code: shareCode,
+                        message: "指定された共有コードの旅行情報が見つかりませんでした。",
+                        debug: {
+                          requestedCode: shareCode,
+                          similarCodes: similarKeys,
+                          availableCodes: blobsList.blobs.map(b => b.key)
+                        }
+                      }),
+                      headers: { 
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*"
+                      }
+                    };
+                  }
+                } catch (err) {
+                  console.warn(`類似コードのデータ取得に失敗:`, err);
+                }
               }
             } catch (listError) {
               console.warn('Blobsリスト取得エラー:', listError);

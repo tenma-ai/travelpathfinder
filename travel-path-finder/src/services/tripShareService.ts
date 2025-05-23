@@ -32,11 +32,14 @@ const base64DecodeUnicode = (base64: string): string => {
  * @returns 短い識別コード
  */
 const generateShortCode = (input: string): string => {
-  // UUID v4の最初の8文字を使用することで衝突可能性を低減
+  // 固定フォーマットの共有コード (常に8文字)
+  // UUIDの最初の部分を使用し、大文字で統一
+  // UUID v4を使用することで衝突リスクを最小限に
   const uuid = uuidv4();
-  const uuidPart = uuid.substr(0, 8).toUpperCase();
+  // "-"を含まない最初の8文字を使用
+  const uuidPart = uuid.replace(/-/g, '').substr(0, 8).toUpperCase();
   
-  // 固定長と予測不可能性を確保
+  // 常に8文字の固定長で返す
   return uuidPart;
 };
 

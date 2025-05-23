@@ -114,9 +114,18 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
       attempts++;
       try {
         // Blobsに保存
-        await store.set(shareCode, jsonData);
+        console.log(`${attempts}回目の保存試行: ${shareCode}`);
+        await store.set(shareCode, jsonData, {
+          // 保存オプション
+          metadata: {
+            tripName: processedTripInfo.name || 'unnamed',
+            createdAt: new Date().toISOString(),
+            idPrefix: processedTripInfo.id.substring(0, 6) || ''
+          }
+        });
         
         // 保存後に検証
+        console.log(`保存検証中: ${shareCode}`);
         const verification = await store.get(shareCode);
         if (!verification) {
           console.error(`試行 ${attempts}/${MAX_ATTEMPTS}: データ保存の検証に失敗しました: ${shareCode}`);
@@ -189,28 +198,10 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
  * @returns 短い識別コード（8文字）
  */
 function generateShareCode(tripInfo: TripInfo): string {
-  // 簡易ハッシュ関数（文字列に基づいた短いコードを生成）
-  const baseCodeInfo = tripInfo.id + tripInfo.name + new Date().toISOString();
-  
-  // ハッシュ計算
-  let hash = 0;
-  for (let i = 0; i < baseCodeInfo.length; i++) {
-    const char = baseCodeInfo.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // 32bit整数に変換
-  }
-  
-  // タイムスタンプを追加して一意性を高める
-  const timestamp = Date.now().toString(36);
-  
-  // ランダムな文字を追加
-  const randomPart = Math.random().toString(36).substr(2, 4);
-  
-  // 8文字のコードを生成（ハッシュ+タイムスタンプ+ランダム）
-  // 全て大文字に変換
-  return (Math.abs(hash).toString(36).substr(0, 3) + 
-          timestamp.substr(-3) + 
-          randomPart.substr(0, 2)).toUpperCase();
+  // 共有コードをUUIDから生成
+  const uuid = tripInfo.id || crypto.randomUUID();
+  // "-"を含まない最初の8文字を使用し、大文字で統一
+  return uuid.replace(/-/g, '').substring(0, 8).toUpperCase();
 }
 
 export { handler }; 

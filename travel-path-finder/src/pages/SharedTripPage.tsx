@@ -196,6 +196,15 @@ const SharedTripPage = () => {
     setError(null);
     setLoading(true);
     setRetryCount(0); // カウンターをリセット
+    // サーバーからの応答を再取得
+    console.log('共有データ再取得を試みます: ' + shareCode);
+
+    // デバッグ情報をクリアして再取得
+    setDebugInfo(prev => ({
+      ...prev,
+      retryAttempt: true,
+      manualRetryTime: new Date().toISOString()
+    }));
   };
 
   if (loading) {
