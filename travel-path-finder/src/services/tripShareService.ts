@@ -56,19 +56,20 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
     const shareCode = generateShortCode(tripInfo.id + tripInfo.name);
     console.log(`生成された共有コード: ${shareCode}`);
     
+    // まずローカルストレージに確実に保存
+    storeTripInfoLocally(shareCode, {
+      ...tripInfo,
+      shareCode,
+      lastUpdated: new Date()
+    });
+    console.log('ローカルストレージに保存完了');
+    
     // 日付関連フィールドをシリアライズするため、クローンして余分なデータを削除
     const tripToShare = JSON.parse(JSON.stringify({
       ...tripInfo,
       shareCode, // 必ず同じ共有コードにする
       lastUpdated: new Date()
     }));
-    
-    // ローカルストレージにも直接保存して冗長性を確保
-    storeTripInfoLocally(shareCode, {
-      ...tripInfo,
-      shareCode,
-      lastUpdated: new Date()
-    });
     
     // リトライ機構を設ける
     let attempts = 0;
@@ -98,20 +99,24 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
             continue;
           }
           
-          throw new Error(`サーバー共有に失敗しました (${response.status}): ${errorData}`);
+          // サーバー共有に失敗してもローカル共有は成功
+          console.warn('サーバー共有は失敗しましたが、ローカル共有で継続します');
+          return shareCode;
         }
         
         serverResponse = await response.json();
         console.log('サーバー共有成功:', serverResponse);
       } catch (error) {
+        console.warn(`サーバー共有エラー、再試行します (${attempts}/${MAX_ATTEMPTS})`, error);
+        
         if (attempts < MAX_ATTEMPTS) {
-          console.warn(`サーバー共有エラー、再試行します (${attempts}/${MAX_ATTEMPTS})`, error);
           await new Promise(resolve => setTimeout(resolve, 500 * attempts));
           continue;
         }
         
-        console.error('すべての試行が失敗しました:', error);
-        throw error;
+        // 最終的にサーバー共有に失敗してもローカル共有を返す
+        console.warn('すべてのサーバー試行が失敗しましたが、ローカル共有で継続します');
+        return shareCode;
       }
     }
     
