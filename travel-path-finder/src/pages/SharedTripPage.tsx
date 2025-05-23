@@ -19,6 +19,8 @@ const SharedTripPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [showAddLocationForm, setShowAddLocationForm] = useState(false);
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
 
   useEffect(() => {
     const loadSharedTrip = async () => {
@@ -29,14 +31,32 @@ const SharedTripPage = () => {
       }
 
       try {
-        console.log(`共有コード「${shareCode}」の旅行情報を読み込み中...`);
-        setDebugInfo(prev => ({ ...prev, startTime: new Date().toISOString() }));
+        console.log(`共有コード「${shareCode}」の旅行情報を読み込み中...（試行回数: ${retryCount + 1}）`);
+        setDebugInfo(prev => ({ 
+          ...prev, 
+          startTime: new Date().toISOString(),
+          shareCode,
+          userAgent: navigator.userAgent,
+          retryCount: retryCount + 1
+        }));
         
         // サーバーAPI＋ローカルストレージから旅行情報を取得（非同期）
         const tripData = await getTripInfoByShareCode(shareCode);
         
         if (!tripData) {
           console.error('共有データが見つかりません');
+          
+          // 最大リトライ回数に達していない場合は再試行
+          if (retryCount < MAX_RETRIES) {
+            console.log(`再試行します (${retryCount + 1}/${MAX_RETRIES})...`);
+            setRetryCount(prev => prev + 1);
+            // 500ms後に再試行
+            setTimeout(() => {
+              loadSharedTrip();
+            }, 500 * (retryCount + 1)); // 徐々に間隔を広げる
+            return;
+          }
+          
           setError('指定された共有コードの旅行情報が見つかりませんでした');
           setLoading(false);
           setDebugInfo(prev => ({ ...prev, error: 'データなし', endTime: new Date().toISOString() }));
@@ -84,6 +104,18 @@ const SharedTripPage = () => {
         setLoading(false);
       } catch (error) {
         console.error('共有旅行情報の読み込み中にエラーが発生しました:', error);
+        
+        // 最大リトライ回数に達していない場合は再試行
+        if (retryCount < MAX_RETRIES) {
+          console.log(`エラーが発生したため再試行します (${retryCount + 1}/${MAX_RETRIES})...`);
+          setRetryCount(prev => prev + 1);
+          // 500ms後に再試行 (リトライごとに待機時間を増やす)
+          setTimeout(() => {
+            loadSharedTrip();
+          }, 500 * (retryCount + 1));
+          return;
+        }
+        
         setError(`共有旅行情報の読み込み中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
         setLoading(false);
         
@@ -138,6 +170,19 @@ const SharedTripPage = () => {
     }
   };
 
+  /**
+   * 再試行ボタン処理
+   */
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setRetryCount(0);
+    // 共有コードを使って再度読み込み
+    if (shareCode) {
+      navigate(`/shared/${shareCode}`, { replace: true });
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50">
@@ -145,6 +190,9 @@ const SharedTripPage = () => {
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-black mb-4"></div>
           <h2 className="text-xl mb-4">共有された旅行情報を読み込み中...</h2>
           <p className="text-gray-600">少々お待ちください</p>
+          {retryCount > 0 && (
+            <p className="text-gray-500 mt-2">再試行中 ({retryCount}/{MAX_RETRIES})</p>
+          )}
         </div>
       </div>
     );
@@ -177,10 +225,16 @@ const SharedTripPage = () => {
             <p>ブラウザ: {navigator.userAgent}</p>
           </div>
           
-          <div className="mt-6">
+          <div className="mt-6 flex flex-col space-y-3">
+            <button
+              onClick={handleRetry}
+              className="w-full bg-black text-white py-2 rounded hover:bg-gray-800"
+            >
+              再試行する
+            </button>
             <button
               onClick={handleBackToHome}
-              className="w-full bg-black text-white py-2 rounded hover:bg-gray-800"
+              className="w-full border border-black text-black py-2 rounded hover:bg-gray-100"
             >
               ホームに戻る
             </button>

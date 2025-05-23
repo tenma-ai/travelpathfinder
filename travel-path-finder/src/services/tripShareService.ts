@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { TripInfo, SharedTripInfo, Participant } from '../types';
-import { compressToURI, decompressFromURI } from '../utils/compression';
+// 直接リンク機能を削除するため、compression関連のインポートを削除
+// import { compressToURI, decompressFromURI } from '../utils/compression';
 
 // ローカルストレージのキー
 const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
@@ -9,6 +10,7 @@ const SHARED_TRIPS_KEY = 'travelPathFinder_sharedTrips';
 const API_BASE_URL = '/api';
 
 // --- Base64エンコード/デコードユーティリティ ---
+// 互換性のために残すが、新しい共有では使わない
 const base64EncodeUnicode = (str: string): string => {
   // UTF-8 -> percent-encoding -> raw bytes -> Base64
   return btoa(unescape(encodeURIComponent(str)));
@@ -59,8 +61,14 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
   try {
     console.log('サーバーレス共有処理開始', { tripName: tripInfo.name });
     
-    // クローンして余分なデータを削除
+    // 日付関連フィールドをシリアライズするため、クローンして余分なデータを削除
     const tripToShare = JSON.parse(JSON.stringify(tripInfo));
+    
+    // ローカルストレージにも直接保存して冗長性を確保
+    const shareCode = generateShortCode(tripInfo.id + tripInfo.name + new Date().toISOString());
+    
+    // ローカルストレージに保存（サーバーに保存する前に）
+    storeTripInfoLocally(shareCode, tripInfo);
     
     // APIリクエスト
     const response = await fetch(`${API_BASE_URL}/createShare`, {
@@ -80,28 +88,16 @@ export const shareToServer = async (tripInfo: TripInfo): Promise<string> => {
     const data = await response.json();
     console.log('サーバー共有成功:', data);
     
-    // クライアント側にも情報を保存（フォールバック用）
-    const sharedTrips = getSharedTrips();
-    
-    // 共有情報を作成
-    const sharedTripInfo: SharedTripInfo = {
-      shareCode: data.shareCode,
-      tripInfo: {
+    // サーバーが返す共有コードをローカルへも保存（上書き）
+    if (data.shareCode && data.shareCode !== shareCode) {
+      storeTripInfoLocally(data.shareCode, {
         ...tripInfo,
-        shareCode: data.shareCode,
-        lastUpdated: new Date(),
-        isServerShared: true
-      },
-      createdAt: new Date(),
-      lastUpdated: new Date(),
-      version: 'v1-server',
-    };
+        shareCode: data.shareCode
+      });
+    }
     
-    // 共有情報をローカルにも保存
-    sharedTrips[data.shareCode] = sharedTripInfo;
-    saveSharedTrips(sharedTrips);
-    
-    return data.shareCode;
+    // サーバーから返された共有コードを使用
+    return data.shareCode || shareCode;
   } catch (error) {
     console.error('サーバーレス共有処理中にエラーが発生しました:', error);
     // サーバー共有に失敗した場合、ローカル共有にフォールバック
@@ -119,31 +115,12 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
   try {
     console.log('共有処理開始', { tripName: tripInfo.name });
     
-    // 既存の共有旅行情報を取得
-    const sharedTrips = getSharedTrips();
-    
     // シンプルな共有コードを生成 (タイムスタンプやIDに基づく固有コード)
     const baseCodeInfo = tripInfo.id + tripInfo.name + new Date().toISOString();
     const shareCode = generateShortCode(baseCodeInfo);
     
-    // 最終更新日時を設定
-    const lastUpdated = new Date();
-    
-    // 共有情報を作成
-    const sharedTripInfo: SharedTripInfo = {
-      shareCode,
-      tripInfo: {
-        ...tripInfo,
-        shareCode,
-        lastUpdated
-      },
-      createdAt: new Date(),
-      lastUpdated
-    };
-    
-    // 共有情報を保存
-    sharedTrips[shareCode] = sharedTripInfo;
-    saveSharedTrips(sharedTrips);
+    // 保存処理を共通関数へ
+    storeTripInfoLocally(shareCode, tripInfo);
     
     console.log(`共有コード生成成功: ${shareCode}`);
     return shareCode;
@@ -154,38 +131,33 @@ export const shareTripInfo = (tripInfo: TripInfo): string => {
 };
 
 /**
- * 旅行情報を共有データとしてエクスポート（直接URLに含めるデータ）
- * 新方式: 圧縮ユーティリティを使用
- * @param tripInfo 共有する旅行情報
- * @returns 圧縮されたデータ文字列
+ * 共有旅行情報をローカルに保存する共通関数
+ * @param shareCode 共有コード
+ * @param tripInfo 旅行情報
  */
-export const exportTripData = (tripInfo: TripInfo): string => {
-  try {
-    // 最小限のデータに変換（サイズ削減のため）
-    const minimalTripInfo = {
+function storeTripInfoLocally(shareCode: string, tripInfo: TripInfo): void {
+  // 最終更新日時を設定
+  const lastUpdated = new Date();
+  
+  // 既存の共有旅行情報を取得
+  const sharedTrips = getSharedTrips();
+  
+  // 共有情報を作成
+  const sharedTripInfo: SharedTripInfo = {
+    shareCode,
+    tripInfo: {
       ...tripInfo,
-      id: tripInfo.id,
-      name: tripInfo.name,
-      members: tripInfo.members,
-      departureLocation: tripInfo.departureLocation,
-      startDate: tripInfo.startDate,
-      endDate: tripInfo.endDate,
-      desiredLocations: tripInfo.desiredLocations,
-      tripType: tripInfo.tripType,
-      lastUpdated: new Date()
-    };
-    
-    // 圧縮ユーティリティを使用
-    return compressToURI(minimalTripInfo);
-  } catch (error) {
-    console.error('旅行データのエクスポート中にエラーが発生しました:', error);
-    // エラー時は最低限の情報のみを含む
-    if (tripInfo && tripInfo.id && tripInfo.name) {
-      return `minimal:${tripInfo.id}:${encodeURIComponent(tripInfo.name)}`;
-    }
-    throw error;
-  }
-};
+      shareCode,
+      lastUpdated
+    },
+    createdAt: new Date(),
+    lastUpdated
+  };
+  
+  // 共有情報を保存
+  sharedTrips[shareCode] = sharedTripInfo;
+  saveSharedTrips(sharedTrips);
+}
 
 /**
  * 共有コードを使用して旅行情報を取得
@@ -252,79 +224,46 @@ export const getTripInfoByShareCode = async (shareCode: string): Promise<TripInf
       return tripInfo;
     }
     
-    console.log(`ローカルストレージでも見つかりませんでした。データ解凍を試行: ${shareCode.substring(0, 20)}...`);
+    // 直接リンク関連のコードを削除（これらのブロックは削除）
     
-    // 3. データ復元を試行（新しい圧縮形式）
+    // 4. 古い形式のBase64エンコードされたデータとして試行（互換性のために残すが、新しい共有では使わない）
     try {
-      // 圧縮データを解凍
-      const tripInfo = decompressFromURI(shareCode);
-      console.log('圧縮データを正常に解凍しました', tripInfo);
-      
-      // データ検証
-      if (!tripInfo || !tripInfo.id || !tripInfo.name) {
-        console.error('解凍されたデータが不完全です');
-        return null;
+      // 長さが妥当なBase64エンコードっぽい文字列の場合のみ試行
+      if (shareCode.length > 50) {
+        // URLデコード
+        const decodedShareCode = decodeURIComponent(shareCode);
+        console.log(`URLデコード後: ${decodedShareCode.substring(0, 50)}...`);
+        
+        // Base64デコード
+        const jsonStr = base64DecodeUnicode(decodedShareCode);
+        console.log(`Base64デコード成功、長さ: ${jsonStr.length}`);
+        
+        // JSONパース
+        const parsed: TripInfo = JSON.parse(jsonStr, dateReviver);
+        console.log('古い形式の共有データを正常に解析しました');
+        
+        // 日付の復元
+        const tripData = restoreTripDates(parsed);
+        
+        // 新しい形式に保存
+        const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
+        tripData.shareCode = newShareCode;
+        
+        // 保存
+        const sharedTripInfo: SharedTripInfo = {
+          shareCode: newShareCode,
+          tripInfo: tripData,
+          createdAt: new Date(),
+          lastUpdated: new Date()
+        };
+        
+        sharedTrips[newShareCode] = sharedTripInfo;
+        saveSharedTrips(sharedTrips);
+        
+        console.log(`古い形式のデータを新形式(${newShareCode})に変換して保存しました`);
+        
+        return tripData;
       }
-      
-      // 日付の修正
-      const tripData = restoreTripDates(tripInfo);
-      
-      // 新しい共有コードを生成
-      const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
-      tripData.shareCode = newShareCode;
-      
-      // 保存
-      const sharedTripInfo: SharedTripInfo = {
-        shareCode: newShareCode,
-        tripInfo: tripData,
-        createdAt: new Date(),
-        lastUpdated: new Date()
-      };
-      
-      sharedTrips[newShareCode] = sharedTripInfo;
-      saveSharedTrips(sharedTrips);
-      
-      console.log(`圧縮データから復元された旅行情報を保存しました: ${newShareCode}`);
-      return tripData;
-    } catch (e) {
-      console.error('データ解凍失敗:', e);
-    }
-    
-    // 4. 古い形式のBase64エンコードされたデータとして試行
-    try {
-      // URLデコード
-      const decodedShareCode = decodeURIComponent(shareCode);
-      console.log(`URLデコード後: ${decodedShareCode.substring(0, 50)}...`);
-      
-      // Base64デコード
-      const jsonStr = base64DecodeUnicode(decodedShareCode);
-      console.log(`Base64デコード成功、長さ: ${jsonStr.length}`);
-      
-      // JSONパース
-      const parsed: TripInfo = JSON.parse(jsonStr, dateReviver);
-      console.log('古い形式の共有データを正常に解析しました');
-      
-      // 日付の復元
-      const tripData = restoreTripDates(parsed);
-      
-      // 新しい形式に保存
-      const newShareCode = generateShortCode(tripData.id + tripData.name + new Date().toISOString());
-      tripData.shareCode = newShareCode;
-      
-      // 保存
-      const sharedTripInfo: SharedTripInfo = {
-        shareCode: newShareCode,
-        tripInfo: tripData,
-        createdAt: new Date(),
-        lastUpdated: new Date()
-      };
-      
-      sharedTrips[newShareCode] = sharedTripInfo;
-      saveSharedTrips(sharedTrips);
-      
-      console.log(`古い形式のデータを新形式(${newShareCode})に変換して保存しました`);
-      
-      return tripData;
     } catch (e) {
       console.error('Base64デコード失敗:', e);
     }
@@ -463,16 +402,6 @@ export const addDesiredLocation = (shareCode: string, desiredLocation: any): boo
     console.error('希望地追加処理中にエラーが発生しました:', error);
     return false;
   }
-};
-
-/**
- * 共有コードを生成 (Base64 方式) - 後方互換性のために残す
- * @param tripInfo 旅行情報
- * @returns ポータブルな共有コード
- */
-export const generatePortableShareCode = (tripInfo: TripInfo): string => {
-  const json = JSON.stringify(tripInfo);
-  return encodeURIComponent(base64EncodeUnicode(json));
 };
 
 /**

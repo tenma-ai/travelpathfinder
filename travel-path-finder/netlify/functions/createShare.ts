@@ -8,12 +8,18 @@ import { getStore } from "@netlify/blobs";
  * 保存期間: 30日（TTL）
  */
 const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> => {
+  // リクエスト情報のログ記録
+  console.log(`REQUEST: ${event.httpMethod} ${event.path} from ${event.headers['client-ip'] || 'unknown'} [${event.headers['user-agent'] || 'unknown'}]`);
+  
   // POSTリクエスト以外は拒否
   if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
       body: JSON.stringify({ error: "Method Not Allowed" }),
-      headers: { "Content-Type": "application/json" }
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
     };
   }
 
@@ -24,7 +30,10 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
       return {
         statusCode: 400,
         body: JSON.stringify({ error: "Missing request body" }),
-        headers: { "Content-Type": "application/json" }
+        headers: { 
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
       };
     }
 
@@ -36,12 +45,16 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
       return {
         statusCode: 400,
         body: JSON.stringify({ error: "Invalid trip data: missing required fields" }),
-        headers: { "Content-Type": "application/json" }
+        headers: { 
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
       };
     }
 
     // 共有コードを生成
     const shareCode = generateShareCode(tripInfo);
+    console.log(`旅行「${tripInfo.name}」の共有コード生成: ${shareCode}`);
     
     // 最終更新日時を設定
     const lastUpdated = new Date().toISOString();
@@ -91,14 +104,51 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
     // JSON文字列化して保存
     const jsonData = JSON.stringify(processedTripInfo);
     console.log(`共有コード「${shareCode}」で旅行データを保存します。データサイズ: ${jsonData.length}バイト`);
-    await store.set(shareCode, jsonData);
     
-    // 保存後に検証
-    const verification = await store.get(shareCode);
-    if (!verification) {
-      console.error(`データ保存の検証に失敗しました: ${shareCode}`);
-    } else {
-      console.log(`保存データの検証完了: ${shareCode} (サイズ: ${verification.length}バイト)`);
+    // リトライ機構を設ける
+    let success = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 3;
+    
+    while (!success && attempts < MAX_ATTEMPTS) {
+      attempts++;
+      try {
+        // Blobsに保存
+        await store.set(shareCode, jsonData);
+        
+        // 保存後に検証
+        const verification = await store.get(shareCode);
+        if (!verification) {
+          console.error(`試行 ${attempts}/${MAX_ATTEMPTS}: データ保存の検証に失敗しました: ${shareCode}`);
+          // 次の試行へ
+        } else {
+          console.log(`試行 ${attempts}/${MAX_ATTEMPTS}: 保存データの検証完了: ${shareCode} (サイズ: ${verification.length}バイト)`);
+          success = true;
+        }
+      } catch (saveError) {
+        console.error(`試行 ${attempts}/${MAX_ATTEMPTS}: データ保存中にエラーが発生: ${saveError}`);
+        
+        if (attempts < MAX_ATTEMPTS) {
+          // リトライ前に待機
+          console.log(`${200 * attempts}ms後に再試行します...`);
+          await new Promise(resolve => setTimeout(resolve, 200 * attempts));
+        }
+      }
+    }
+    
+    // すべての試行が失敗した場合
+    if (!success) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ 
+          error: "Failed to save share data after multiple attempts",
+          shareCode // それでも共有コードは返す
+        }),
+        headers: { 
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
+      };
     }
     
     console.log(`旅行共有データを保存しました: ${shareCode}`);
@@ -109,9 +159,12 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
       body: JSON.stringify({
         shareCode,
         message: "共有データを作成しました",
-        ttl: "30 days"
+        dataSize: jsonData.length
       }),
-      headers: { "Content-Type": "application/json" }
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
     };
   } catch (error) {
     console.error("共有データ作成中にエラーが発生しました:", error);
@@ -122,7 +175,10 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
         error: "Internal Server Error",
         message: error instanceof Error ? error.message : "Unknown error"
       }),
-      headers: { "Content-Type": "application/json" }
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
     };
   }
 };

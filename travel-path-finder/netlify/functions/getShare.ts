@@ -7,6 +7,9 @@ import { getStore } from "@netlify/blobs";
  * パス例: /api/getShare/ABC123
  */
 const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> => {
+  // リクエスト情報のログ記録
+  console.log(`REQUEST: ${event.httpMethod} ${event.path} from ${event.headers['client-ip'] || 'unknown'} [${event.headers['user-agent'] || 'unknown'}]`);
+
   // GETリクエスト以外は拒否
   if (event.httpMethod !== "GET") {
     return {
@@ -37,72 +40,106 @@ const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> =
 
     console.log(`共有コード「${shareCode}」の旅行データを取得します`);
 
-    // Blobsストアからデータを取得
+    // Netlify Blobsストアからデータを取得
+    // 注意: 型エラーのため引数は1つだけ指定
     const store = getStore("trip-shares");
     
-    // list メソッドを使用して利用可能なキーを表示（デバッグ用）
     try {
-      const blobsList = await store.list();
-      console.log(`利用可能なBlobs: ${blobsList.blobs.length}件`, 
-        blobsList.blobs.slice(0, 10).map(b => b.key));
-    } catch (listError) {
-      console.warn('Blobsリスト取得エラー:', listError);
-    }
-    
-    const storedData = await store.get(shareCode);
-    
-    if (!storedData) {
-      console.log(`共有コード「${shareCode}」に対応するデータがありません`);
+      // 注: 現在のバージョンでは強い整合性を指定できないため通常モードで取得
+      const storedData = await store.get(shareCode);
       
-      // コードが見つからない場合、部分一致のキーを探す（デバッグ用）
-      try {
-        const blobsList = await store.list();
-        const similarKeys = blobsList.blobs
-          .map(b => b.key)
-          .filter(key => key.includes(shareCode.substring(0, 4)));
+      if (!storedData) {
+        console.log(`共有コード「${shareCode}」に対応するデータがありません`);
         
-        console.log(`類似コード: ${similarKeys.join(', ')}`);
-      } catch (e) {
-        console.warn('類似キー検索エラー:', e);
+        // エラーダイアグノスティック：Blobsリスト取得を試行
+        try {
+          const blobsList = await store.list();
+          console.log(`利用可能なBlobs: ${blobsList.blobs.length}件（最初の3件）`, 
+            blobsList.blobs.slice(0, 3).map(b => b.key));
+            
+          // 類似コード検索
+          const similarKeys = blobsList.blobs
+            .map(b => b.key)
+            .filter(key => key.includes(shareCode.substring(0, 3)));
+            
+          if (similarKeys.length > 0) {
+            console.log(`類似コード (${similarKeys.length}件): ${similarKeys.slice(0, 3).join(', ')}${similarKeys.length > 3 ? '...' : ''}`);
+          }
+        } catch (listError) {
+          console.warn('Blobsリスト取得エラー:', listError);
+        }
+        
+        return {
+          statusCode: 404,
+          body: JSON.stringify({ 
+            error: "Share data not found",
+            code: shareCode,
+            message: "指定された共有コードの旅行情報が見つかりませんでした。"
+          }),
+          headers: { 
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        };
+      }
+
+      console.log(`共有コード「${shareCode}」の旅行データを正常に取得しました (${storedData.length} バイト)`);
+      
+      // JSONパースして検証（ログのみ）
+      try {
+        const parsed = JSON.parse(storedData);
+        console.log(`データの検証: id=${parsed.id}, name=${parsed.name}, 場所数=${parsed.desiredLocations?.length || 0}`);
+      } catch (parseError) {
+        console.warn('データパースエラー:', parseError);
       }
       
+      // データをそのまま返す（JSONオブジェクトに変換せずに文字列のまま）
       return {
-        statusCode: 404,
-        body: JSON.stringify({ 
-          error: "Share data not found",
-          code: shareCode,
-          message: "指定された共有コードの旅行情報が見つかりませんでした。別のブラウザやデバイスから共有された場合、新しい共有リンクを生成してください。"
-        }),
+        statusCode: 200,
+        body: storedData,
         headers: { 
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": "*", 
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
         }
       };
-    }
-
-    console.log(`共有コード「${shareCode}」の旅行データを正常に取得しました`);
-    
-    // JSONパースして検証（ログのみ）
-    try {
-      const parsed = JSON.parse(storedData);
-      console.log(`データの検証: id=${parsed.id}, name=${parsed.name}, 場所数=${parsed.desiredLocations?.length || 0}`);
-    } catch (parseError) {
-      console.warn('データパースエラー:', parseError);
-    }
-    
-    // データをそのまま返す（JSONオブジェクトに変換せずに文字列のまま）
-    return {
-      statusCode: 200,
-      body: storedData,
-      headers: { 
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*", 
-        "Cache-Control": "no-store, max-age=0"
+    } catch (blobError) {
+      console.error("Blobsからのデータ取得中にエラーが発生:", blobError);
+      
+      // エラー時に再試行（短い待機時間を入れる）
+      try {
+        console.log("少し待機してから再試行します...");
+        // 100ms待機
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // 再試行
+        const storedDataRetry = await store.get(shareCode);
+        
+        if (storedDataRetry) {
+          console.log(`再試行で共有コード「${shareCode}」のデータを取得しました (${storedDataRetry.length} バイト)`);
+          
+          return {
+            statusCode: 200,
+            body: storedDataRetry,
+            headers: { 
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*", 
+              "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+            }
+          };
+        }
+      } catch (retryError) {
+        console.error("再試行中にもエラーが発生:", retryError);
       }
-    };
+      
+      throw blobError;
+    }
   } catch (error) {
     console.error("共有データ取得中にエラーが発生しました:", error);
     
+    // エラーレスポンス
     return {
       statusCode: 500,
       body: JSON.stringify({ 

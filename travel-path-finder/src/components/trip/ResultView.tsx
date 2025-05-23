@@ -3,7 +3,7 @@ import type { Itinerary, TripInfo } from '../../types';
 import MapView from './MapView';
 import VisualFlow from './VisualFlow';
 import CalendarView from './CalendarView';
-import { shareTripInfo, exportTripData, shareToServer } from '../../services/tripShareService';
+import { shareTripInfo, shareToServer } from '../../services/tripShareService';
 
 interface ResultViewProps {
   tripInfo: TripInfo;
@@ -18,11 +18,10 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
   const { members, generatedItinerary } = tripInfo;
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
-  const [shareMethod, setShareMethod] = useState<'code' | 'url' | 'direct'>('code');
+  const [shareMethod, setShareMethod] = useState<'code' | 'url'>('code');
   const [isSharing, setIsSharing] = useState(false);
   
   if (!generatedItinerary) {
@@ -71,18 +70,6 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
         console.log('ローカル共有にフォールバック:', { code, shareUrl });
       }
       
-      // 3. 補助: 直接データを含めた短いURL方式（圧縮データを使用）
-      try {
-        const compressedData = exportTripData(tripInfo);
-        const baseUrl = window.location.origin;
-        const directUrl = `${baseUrl}/shared/${encodeURIComponent(compressedData)}`;
-        setCompressedUrl(directUrl);
-        console.log('圧縮データURL生成成功:', directUrl.substring(0, 50) + '...');
-      } catch (compressErr) {
-        console.error('圧縮データ生成エラー', compressErr);
-        setCompressedUrl(null);
-      }
-      
       setShareError(null);
       console.log('ResultView: 共有処理完了');
       setIsShareModalOpen(true);
@@ -122,15 +109,6 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
         setTimeout(() => setCopyMessage(null), 2000);
       } catch (error) {
         console.error('ResultView: URLコピーエラー', error);
-        setCopyMessage('URLのコピーに失敗しました。手動でコピーしてください。');
-      }
-    } else if (shareMethod === 'direct' && compressedUrl) {
-      try {
-        navigator.clipboard.writeText(compressedUrl);
-        setCopyMessage('直接共有URLをコピーしました');
-        setTimeout(() => setCopyMessage(null), 2000);
-      } catch (error) {
-        console.error('ResultView: 直接URL コピーエラー', error);
         setCopyMessage('URLのコピーに失敗しました。手動でコピーしてください。');
       }
     }
@@ -246,13 +224,6 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                     >
                       共有URL
                     </button>
-                    <button
-                      className={`py-2 px-4 ${shareMethod === 'direct' ? 'border-b-2 border-black font-bold' : 'text-gray-500'}`}
-                      onClick={() => setShareMethod('direct')}
-                      disabled={!compressedUrl}
-                    >
-                      直接URL
-                    </button>
                   </div>
                   
                   {shareMethod === 'code' && (
@@ -294,27 +265,6 @@ const ResultView = ({ tripInfo, onReset, onAddLocation }: ResultViewProps) => {
                         </button>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">※ URLを受け取った人はリンクをクリックするだけで参加できます</p>
-                    </>
-                  )}
-                  
-                  {shareMethod === 'direct' && (
-                    <>
-                      <p className="text-sm font-medium text-black mb-1">直接共有URL（最短）:</p>
-                      <div className="flex">
-                        <input
-                          type="text"
-                          value={compressedUrl || ''}
-                          readOnly
-                          className="flex-grow border border-black rounded-l p-2 text-black bg-white text-xs"
-                        />
-                        <button
-                          onClick={handleCopyUrl}
-                          className="bg-black text-white px-4 py-2 rounded-r"
-                        >
-                          コピー
-                        </button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">※ 最も簡単な方法ですが、一部環境では正しく動作しない場合があります</p>
                     </>
                   )}
                 </div>
